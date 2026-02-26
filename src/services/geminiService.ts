@@ -59,10 +59,13 @@ export async function getRecommendations(
   });
 
   let text = response.text || "[]";
-  // Extract JSON array if wrapped in markdown or other text
-  const match = text.match(/\[[\s\S]*\]/);
-  if (match) {
-    text = match[0];
+
+  // Extract JSON array using fast string operations instead of regex
+  const firstBracket = text.indexOf("[");
+  const lastBracket = text.lastIndexOf("]");
+
+  if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
+    text = text.substring(firstBracket, lastBracket + 1);
   }
 
   try {
