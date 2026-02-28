@@ -7,10 +7,10 @@ export interface TravelFormData {
   duration: string;
   travelers: string;
   budget: string;
-  primaryGoal: string;
+  primaryGoal: string[];
   foodPreferences: string;
   activityPreferences: string;
-  transportation: string;
+  transportation: string[];
   locations: string;
   mustSeeLocations: string;
 }
@@ -33,11 +33,12 @@ export async function getRecommendations(
     Duration: ${data.duration}
     Travelers: ${data.travelers}
     Budget: ${data.budget}
-    Primary Goal: ${data.primaryGoal}
+    Primary Goal(s): ${data.primaryGoal?.length > 0 ? data.primaryGoal.join(", ") : "Any"}
     Food Preferences: ${data.foodPreferences}
     Activity Preferences: ${data.activityPreferences}
-    Transportation: ${data.transportation}
-    Preferred Locations/Regions: ${data.locations || "Not specified. Please recommend suitable destinations based on the other criteria."}
+    Transportation: ${data.transportation?.length > 0 ? data.transportation.join(", ") : "Any"}
+    Preferred Locations/Regions: ${data.locations || "Not specified."}
+    (CRITICAL: If the user specifies locations, you MUST ONLY recommend from those exact locations. Do NOT suggest alternative destinations. If they provide multiple options with 'or', evaluate and recommend the best ones. If they provide fewer than 3 locations, create distinct trip styles for those specific locations to reach 3 recommendations.)
     Must-See Locations: ${data.mustSeeLocations || "None specified"}
 
     You MUST return your response as a valid JSON array of objects. Do not include any other text or markdown formatting outside the JSON array.
@@ -46,7 +47,7 @@ export async function getRecommendations(
     - "title": string, the destination and a catchy title
     - "description": string, a brief paragraph describing why this is a good fit
     - "highlights": array of strings, 3-4 key highlights or activities
-    - "estimatedCost": string, a rough estimate of the total cost
+    - "estimatedCost": string, a numerical estimated cost range in USD (e.g., "$2,000 - $3,000"). Do NOT use vague terms like "low" or "moderate".
     - "bestTimeToGo": string, the recommended time of year or specific months to visit
   `;
 
@@ -86,10 +87,10 @@ export async function getItinerary(
     Duration: ${data.duration}
     Travelers: ${data.travelers}
     Budget: ${data.budget}
-    Primary Goal: ${data.primaryGoal}
+    Primary Goal(s): ${data.primaryGoal?.length > 0 ? data.primaryGoal.join(", ") : "Any"}
     Food Preferences: ${data.foodPreferences}
     Activity Preferences: ${data.activityPreferences}
-    Transportation: ${data.transportation}
+    Transportation: ${data.transportation?.length > 0 ? data.transportation.join(", ") : "Any"}
     Must-See Locations: ${data.mustSeeLocations || "None specified"}
 
     Please format the response in Markdown. Include:

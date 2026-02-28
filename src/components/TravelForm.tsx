@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { TravelFormData } from '../services/geminiService';
-import { PlaneTakeoff } from 'lucide-react';
+import React, { useState } from "react";
+import { TravelFormData } from "../services/geminiService";
+import { PlaneTakeoff } from "lucide-react";
 
 interface TravelFormProps {
   onSubmit: (data: TravelFormData) => void;
@@ -9,25 +9,62 @@ interface TravelFormProps {
 }
 
 const defaultFormData: TravelFormData = {
-  timeOfYear: '',
-  duration: '',
-  travelers: '',
-  budget: '',
-  primaryGoal: '',
-  foodPreferences: '',
-  activityPreferences: '',
-  transportation: '',
-  locations: '',
-  mustSeeLocations: '',
+  timeOfYear: "",
+  duration: "",
+  travelers: "",
+  budget: "",
+  primaryGoal: [],
+  foodPreferences: "",
+  activityPreferences: "",
+  transportation: [],
+  locations: "",
+  mustSeeLocations: "",
 };
 
-export default function TravelForm({ onSubmit, isLoading, initialData }: TravelFormProps) {
-  const [formData, setFormData] = useState<TravelFormData>(initialData || defaultFormData);
+export default function TravelForm({
+  onSubmit,
+  isLoading,
+  initialData,
+}: TravelFormProps) {
+  const [formData, setFormData] = useState<TravelFormData>(
+    initialData || defaultFormData,
+  );
 
-  const handleChange = (e: React.ChangeEvent<HTMLSelectElement | HTMLInputElement>) => {
+  const handleChange = (
+    e: React.ChangeEvent<HTMLSelectElement | HTMLInputElement>,
+  ) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
+
+  const handleArrayToggle = (
+    field: "primaryGoal" | "transportation",
+    value: string,
+  ) => {
+    setFormData((prev) => {
+      const current = (prev[field] as string[]) || [];
+      if (current.includes(value)) {
+        return { ...prev, [field]: current.filter((v) => v !== value) };
+      } else {
+        return { ...prev, [field]: [...current, value] };
+      }
+    });
+  };
+
+  const goalOptions = [
+    "Relaxation",
+    "Adventure",
+    "Cultural Exploration",
+    "Nature & Wildlife",
+    "Food & Culinary",
+    "Party & Nightlife",
+  ];
+  const transportOptions = [
+    "Public Transit",
+    "Rental Car",
+    "Walking/Biking",
+    "Taxis/Rideshare",
+  ];
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -41,15 +78,25 @@ export default function TravelForm({ onSubmit, isLoading, initialData }: TravelF
           <PlaneTakeoff size={24} />
         </div>
         <div>
-          <h2 className="text-2xl font-semibold text-slate-900">Design Your Trip</h2>
-          <p className="text-slate-500 text-sm mt-1">Tell us your preferences and we'll craft the perfect journey.</p>
+          <h2 className="text-2xl font-semibold text-slate-900">
+            Design Your Trip
+          </h2>
+          <p className="text-slate-500 text-sm mt-1">
+            Tell us your preferences and we'll craft the perfect journey.
+          </p>
         </div>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="space-y-2">
-            <label htmlFor="timeOfYear" className="block text-sm font-medium text-slate-700">Time of Year <span className="text-slate-400 font-normal">(Optional)</span></label>
+            <label
+              htmlFor="timeOfYear"
+              className="block text-sm font-medium text-slate-700"
+            >
+              Time of Year{" "}
+              <span className="text-slate-400 font-normal">(Optional)</span>
+            </label>
             <select
               id="timeOfYear"
               name="timeOfYear"
@@ -57,7 +104,9 @@ export default function TravelForm({ onSubmit, isLoading, initialData }: TravelF
               onChange={handleChange}
               className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
             >
-              <option value="" disabled>Select...</option>
+              <option value="" disabled>
+                Select...
+              </option>
               <option value="Spring">Spring</option>
               <option value="Summer">Summer</option>
               <option value="Autumn">Autumn</option>
@@ -67,7 +116,12 @@ export default function TravelForm({ onSubmit, isLoading, initialData }: TravelF
           </div>
 
           <div className="space-y-2">
-            <label htmlFor="duration" className="block text-sm font-medium text-slate-700">Duration</label>
+            <label
+              htmlFor="duration"
+              className="block text-sm font-medium text-slate-700"
+            >
+              Duration
+            </label>
             <select
               id="duration"
               name="duration"
@@ -76,7 +130,9 @@ export default function TravelForm({ onSubmit, isLoading, initialData }: TravelF
               required
               className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
             >
-              <option value="" disabled>Select...</option>
+              <option value="" disabled>
+                Select...
+              </option>
               <option value="Weekend (2-3 days)">Weekend (2-3 days)</option>
               <option value="1 Week">1 Week</option>
               <option value="2 Weeks">2 Weeks</option>
@@ -85,7 +141,12 @@ export default function TravelForm({ onSubmit, isLoading, initialData }: TravelF
           </div>
 
           <div className="space-y-2">
-            <label htmlFor="travelers" className="block text-sm font-medium text-slate-700">Travelers</label>
+            <label
+              htmlFor="travelers"
+              className="block text-sm font-medium text-slate-700"
+            >
+              Travelers
+            </label>
             <select
               id="travelers"
               name="travelers"
@@ -94,7 +155,9 @@ export default function TravelForm({ onSubmit, isLoading, initialData }: TravelF
               required
               className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
             >
-              <option value="" disabled>Select...</option>
+              <option value="" disabled>
+                Select...
+              </option>
               <option value="Solo">Solo</option>
               <option value="Couple">Couple</option>
               <option value="Family">Family</option>
@@ -103,7 +166,12 @@ export default function TravelForm({ onSubmit, isLoading, initialData }: TravelF
           </div>
 
           <div className="space-y-2">
-            <label htmlFor="budget" className="block text-sm font-medium text-slate-700">Budget</label>
+            <label
+              htmlFor="budget"
+              className="block text-sm font-medium text-slate-700"
+            >
+              Budget
+            </label>
             <select
               id="budget"
               name="budget"
@@ -112,68 +180,98 @@ export default function TravelForm({ onSubmit, isLoading, initialData }: TravelF
               required
               className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
             >
-              <option value="" disabled>Select...</option>
+              <option value="" disabled>
+                Select...
+              </option>
               <option value="Budget-friendly">Budget-friendly</option>
               <option value="Moderate">Moderate</option>
               <option value="Luxury">Luxury</option>
             </select>
           </div>
 
-          <div className="space-y-2">
-            <label htmlFor="primaryGoal" className="block text-sm font-medium text-slate-700">Primary Goal</label>
-            <select
-              id="primaryGoal"
-              name="primaryGoal"
-              value={formData.primaryGoal}
-              onChange={handleChange}
-              required
-              className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
-            >
-              <option value="" disabled>Select...</option>
-              <option value="Relaxation">Relaxation</option>
-              <option value="Adventure">Adventure</option>
-              <option value="Cultural Exploration">Cultural Exploration</option>
-              <option value="Nature & Wildlife">Nature & Wildlife</option>
-              <option value="Food & Culinary">Food & Culinary</option>
-              <option value="Party & Nightlife">Party & Nightlife</option>
-            </select>
+          <div className="space-y-3 md:col-span-2">
+            <label className="block text-sm font-medium text-slate-700">
+              Primary Goals{" "}
+              <span className="text-slate-400 font-normal">
+                (Select multiple)
+              </span>
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {goalOptions.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => handleArrayToggle("primaryGoal", option)}
+                  className={`px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${
+                    formData.primaryGoal.includes(option)
+                      ? "bg-emerald-100 border-emerald-500 text-emerald-800"
+                      : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
+                  }`}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
           </div>
 
-          <div className="space-y-2">
-            <label htmlFor="transportation" className="block text-sm font-medium text-slate-700">Transportation</label>
-            <select
-              id="transportation"
-              name="transportation"
-              value={formData.transportation}
-              onChange={handleChange}
-              required
-              className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
-            >
-              <option value="" disabled>Select...</option>
-              <option value="Public Transit">Public Transit</option>
-              <option value="Rental Car">Rental Car</option>
-              <option value="Walking/Biking">Walking/Biking</option>
-              <option value="Taxis/Rideshare">Taxis/Rideshare</option>
-            </select>
+          <div className="space-y-3 md:col-span-2">
+            <label className="block text-sm font-medium text-slate-700">
+              Transportation{" "}
+              <span className="text-slate-400 font-normal">
+                (Select multiple)
+              </span>
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {transportOptions.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => handleArrayToggle("transportation", option)}
+                  className={`px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${
+                    formData.transportation.includes(option)
+                      ? "bg-emerald-100 border-emerald-500 text-emerald-800"
+                      : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
+                  }`}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
         <div className="space-y-4 pt-4 border-t border-slate-100">
           <div className="space-y-2">
-            <label htmlFor="locations" className="block text-sm font-medium text-slate-700">Preferred Locations <span className="text-slate-400 font-normal">(Optional)</span></label>
+            <label
+              htmlFor="locations"
+              className="block text-sm font-medium text-slate-700"
+            >
+              Preferred Locations{" "}
+              <span className="text-slate-400 font-normal">(Optional)</span>
+            </label>
+            <p className="text-xs text-slate-500 mb-2">
+              You can suggest multiple options (e.g., "Japan or South Korea")
+              and we'll pick the best one for your budget and season.
+            </p>
             <input
               type="text"
               id="locations"
               name="locations"
               value={formData.locations}
               onChange={handleChange}
-              placeholder="e.g., Japan, Europe, Beach destinations..."
+              placeholder="e.g., Japan or South Korea, Europe..."
               className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
             />
           </div>
 
           <div className="space-y-2">
-            <label htmlFor="mustSeeLocations" className="block text-sm font-medium text-slate-700">Must-See Locations <span className="text-slate-400 font-normal">(Optional)</span></label>
+            <label
+              htmlFor="mustSeeLocations"
+              className="block text-sm font-medium text-slate-700"
+            >
+              Must-See Locations{" "}
+              <span className="text-slate-400 font-normal">(Optional)</span>
+            </label>
             <input
               type="text"
               id="mustSeeLocations"
@@ -186,7 +284,12 @@ export default function TravelForm({ onSubmit, isLoading, initialData }: TravelF
           </div>
 
           <div className="space-y-2">
-            <label htmlFor="foodPreferences" className="block text-sm font-medium text-slate-700">Food Preferences</label>
+            <label
+              htmlFor="foodPreferences"
+              className="block text-sm font-medium text-slate-700"
+            >
+              Food Preferences
+            </label>
             <input
               type="text"
               id="foodPreferences"
@@ -200,7 +303,12 @@ export default function TravelForm({ onSubmit, isLoading, initialData }: TravelF
           </div>
 
           <div className="space-y-2">
-            <label htmlFor="activityPreferences" className="block text-sm font-medium text-slate-700">Activity Preferences</label>
+            <label
+              htmlFor="activityPreferences"
+              className="block text-sm font-medium text-slate-700"
+            >
+              Activity Preferences
+            </label>
             <input
               type="text"
               id="activityPreferences"
