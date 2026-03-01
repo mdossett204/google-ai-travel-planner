@@ -9,10 +9,16 @@ interface TravelFormProps {
 }
 
 const defaultFormData: TravelFormData = {
-  timeOfYear: "",
-  duration: "",
+  timeOfYear: [],
+  durationValue: "",
+  durationUnit: "days",
   travelers: "",
-  budget: "",
+  budget: {
+    lodging: "",
+    transportation: "",
+    food: "",
+    misc: "",
+  },
   primaryGoal: [],
   foodPreferences: "",
   activityPreferences: "",
@@ -38,7 +44,7 @@ export default function TravelForm({
   };
 
   const handleArrayToggle = (
-    field: "primaryGoal" | "transportation",
+    field: "primaryGoal" | "transportation" | "timeOfYear",
     value: string,
   ) => {
     setFormData((prev) => {
@@ -65,6 +71,20 @@ export default function TravelForm({
     "Walking/Biking",
     "Taxis/Rideshare",
   ];
+  const monthOptions = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -89,55 +109,66 @@ export default function TravelForm({
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="space-y-2">
-            <label
-              htmlFor="timeOfYear"
-              className="block text-sm font-medium text-slate-700"
-            >
+          <div className="space-y-3 md:col-span-2">
+            <label className="block text-sm font-medium text-slate-700">
               Time of Year{" "}
-              <span className="text-slate-400 font-normal">(Optional)</span>
+              <span className="text-slate-400 font-normal">
+                (Select months)
+              </span>
             </label>
-            <select
-              id="timeOfYear"
-              name="timeOfYear"
-              value={formData.timeOfYear}
-              onChange={handleChange}
-              className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
-            >
-              <option value="" disabled>
-                Select...
-              </option>
-              <option value="Spring">Spring</option>
-              <option value="Summer">Summer</option>
-              <option value="Autumn">Autumn</option>
-              <option value="Winter">Winter</option>
-              <option value="Flexible">Flexible</option>
-            </select>
+            <div className="flex flex-wrap gap-2">
+              {monthOptions.map((month) => (
+                <button
+                  key={month}
+                  type="button"
+                  onClick={() => handleArrayToggle("timeOfYear", month)}
+                  className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${
+                    formData.timeOfYear.includes(month)
+                      ? "bg-emerald-100 border-emerald-500 text-emerald-800"
+                      : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
+                  }`}
+                >
+                  {month}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="space-y-2">
-            <label
-              htmlFor="duration"
-              className="block text-sm font-medium text-slate-700"
-            >
+            <label className="block text-sm font-medium text-slate-700">
               Duration
             </label>
-            <select
-              id="duration"
-              name="duration"
-              value={formData.duration}
-              onChange={handleChange}
-              required
-              className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
-            >
-              <option value="" disabled>
-                Select...
-              </option>
-              <option value="Weekend (2-3 days)">Weekend (2-3 days)</option>
-              <option value="1 Week">1 Week</option>
-              <option value="2 Weeks">2 Weeks</option>
-              <option value="1 Month+">1 Month+</option>
-            </select>
+            <div className="flex gap-2">
+              <input
+                type="number"
+                min="1"
+                required
+                value={formData.durationValue}
+                onChange={(e) =>
+                  setFormData((p) => ({
+                    ...p,
+                    durationValue: e.target.value
+                      ? parseInt(e.target.value)
+                      : "",
+                  }))
+                }
+                className="w-2/3 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
+                placeholder="e.g. 5"
+              />
+              <select
+                value={formData.durationUnit}
+                onChange={(e) =>
+                  setFormData((p) => ({
+                    ...p,
+                    durationUnit: e.target.value as "days" | "weeks",
+                  }))
+                }
+                className="w-1/3 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
+              >
+                <option value="days">Days</option>
+                <option value="weeks">Weeks</option>
+              </select>
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -165,28 +196,102 @@ export default function TravelForm({
             </select>
           </div>
 
-          <div className="space-y-2">
-            <label
-              htmlFor="budget"
-              className="block text-sm font-medium text-slate-700"
-            >
-              Budget
+          <div className="space-y-3 md:col-span-2">
+            <label className="block text-sm font-medium text-slate-700">
+              Detailed Budget (USD)
             </label>
-            <select
-              id="budget"
-              name="budget"
-              value={formData.budget}
-              onChange={handleChange}
-              required
-              className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
-            >
-              <option value="" disabled>
-                Select...
-              </option>
-              <option value="Budget-friendly">Budget-friendly</option>
-              <option value="Moderate">Moderate</option>
-              <option value="Luxury">Luxury</option>
-            </select>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <label className="text-xs text-slate-500">
+                  Lodging (per night)
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2.5 text-slate-500">
+                    $
+                  </span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={formData.budget.lodging}
+                    onChange={(e) =>
+                      setFormData((p) => ({
+                        ...p,
+                        budget: { ...p.budget, lodging: e.target.value },
+                      }))
+                    }
+                    className="w-full rounded-xl border border-slate-300 bg-white pl-8 pr-4 py-2 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
+                    placeholder="e.g. 150"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-slate-500">
+                  Transportation/Flights (total)
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2.5 text-slate-500">
+                    $
+                  </span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={formData.budget.transportation}
+                    onChange={(e) =>
+                      setFormData((p) => ({
+                        ...p,
+                        budget: { ...p.budget, transportation: e.target.value },
+                      }))
+                    }
+                    className="w-full rounded-xl border border-slate-300 bg-white pl-8 pr-4 py-2 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
+                    placeholder="e.g. 500"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-slate-500">Food (per day)</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2.5 text-slate-500">
+                    $
+                  </span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={formData.budget.food}
+                    onChange={(e) =>
+                      setFormData((p) => ({
+                        ...p,
+                        budget: { ...p.budget, food: e.target.value },
+                      }))
+                    }
+                    className="w-full rounded-xl border border-slate-300 bg-white pl-8 pr-4 py-2 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
+                    placeholder="e.g. 100"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-slate-500">
+                  Activities & Misc (total)
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2.5 text-slate-500">
+                    $
+                  </span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={formData.budget.misc}
+                    onChange={(e) =>
+                      setFormData((p) => ({
+                        ...p,
+                        budget: { ...p.budget, misc: e.target.value },
+                      }))
+                    }
+                    className="w-full rounded-xl border border-slate-300 bg-white pl-8 pr-4 py-2 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
+                    placeholder="e.g. 300"
+                  />
+                </div>
+              </div>
+            </div>
           </div>
 
           <div className="space-y-3 md:col-span-2">
