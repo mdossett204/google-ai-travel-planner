@@ -100,6 +100,8 @@ export async function getItinerary(
   const activityPrompt = `
     You are the 'Activity Planner Agent'.
     Destination: ${recommendation.title}
+    Region/State Requested: ${data.locations || "Not specified"}
+    Trip Context: ${recommendation.description}
     Time of Year: ${data.timeOfYear?.length > 0 ? data.timeOfYear.join(", ") : "Not specified"}
     Duration: ${data.durationValue} ${data.durationUnit}
     Travelers: ${data.travelers}
