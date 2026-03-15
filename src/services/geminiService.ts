@@ -1,6 +1,8 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+// NOTE: Gemini is now called from a serverless API route for recommendations only.
 
 export interface TravelFormData {
   timeOfYear: string[];
@@ -33,60 +35,23 @@ export interface Recommendation {
 export async function getRecommendations(
   data: TravelFormData,
 ): Promise<Recommendation[]> {
-  const prompt = `
-    Based on the following travel preferences, provide 3 distinct travel recommendations.
-    Time of Year: ${data.timeOfYear?.length > 0 ? data.timeOfYear.join(", ") : "Not specified. Please recommend the best time of year to visit."}
-    Duration: ${data.durationValue} ${data.durationUnit}
-    Travelers: ${data.travelers}
-    Budget (Treat as upper limit, but options within +/- 20% are acceptable):
-      - Lodging: $${data.budget.lodging || "Any"} per night
-      - Transportation/Flights: $${data.budget.transportation || "Any"} total
-      - Food: $${data.budget.food || "Any"} per day
-      - Miscellaneous/Activities: $${data.budget.misc || "Any"} total
-    Primary Goal(s): ${data.primaryGoal?.length > 0 ? data.primaryGoal.join(", ") : "Any"}
-    Food Preferences: ${data.foodPreferences}
-    Activity Preferences: ${data.activityPreferences}
-    Transportation: ${data.transportation?.length > 0 ? data.transportation.join(", ") : "Any"}
-    Preferred Locations/Regions: ${data.locations || "Not specified."}
-    (CRITICAL: If the user specifies locations, you MUST ONLY recommend from those exact locations. Do NOT suggest alternative destinations. If they provide multiple options with 'or', evaluate and recommend the best ones. If they provide fewer than 3 locations, create distinct trip styles for those specific locations to reach 3 recommendations.)
-    Must-See Locations: ${data.mustSeeLocations || "None specified"}
-
-    You MUST return your response as a valid JSON array of objects. Do not include any other text or markdown formatting outside the JSON array.
-    Each object in the array must have exactly these keys:
-    - "id": a unique string identifier
-    - "title": string, the destination and a catchy title
-    - "description": string, a brief paragraph describing why this is a good fit
-    - "highlights": array of strings, 3-4 key highlights or activities
-    - "estimatedCost": string, a numerical estimated cost range in USD (e.g., "$2,000 - $3,000"). Do NOT use vague terms like "low" or "moderate".
-    - "bestTimeToGo": string, the recommended time of year or specific months to visit
-  `;
-
-  const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
-    contents: prompt,
-    config: {
-      tools: [{ googleSearch: {} }],
-      systemInstruction:
-        "You are an elite travel concierge. You MUST use Google Search to verify that all places, hotels, restaurants, and attractions currently exist, are open, and fit the budget. Provide factual, accurate information.",
-    },
+  // Previous client-side Gemini call is intentionally removed for security.
+  // Keeping this comment to preserve the original flow as reference:
+  // - It used GoogleGenAI directly in the browser.
+  // - It parsed JSON from the model response.
+  // We now call the serverless API instead.
+  const res = await fetch("/api/recommendations", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
   });
 
-  let text = response.text || "[]";
-
-  // Extract JSON array using fast string operations instead of regex
-  const firstBracket = text.indexOf("[");
-  const lastBracket = text.lastIndexOf("]");
-
-  if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
-    text = text.substring(firstBracket, lastBracket + 1);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to fetch recommendations.");
   }
 
-  try {
-    return JSON.parse(text);
-  } catch (e) {
-    console.error("Failed to parse JSON response:", text);
-    throw new Error("Failed to parse recommendations from AI.");
-  }
+  return (await res.json()) as Recommendation[];
 }
 
 export async function getItinerary(

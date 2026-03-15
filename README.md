@@ -8,6 +8,9 @@
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+2. Set your API keys in `.env.local` (used by serverless API)
+3. Run locally with Vercel (recommended so serverless functions see env vars):
+   `npx vercel dev`
+
+Note: `npm run dev` only loads Vite env vars (prefixed with `VITE_`) for the browser.
+Serverless API routes read from process env when running via Vercel.
