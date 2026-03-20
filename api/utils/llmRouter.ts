@@ -34,41 +34,68 @@ export async function generateText(opts: {
   systemInstruction?: string;
   useSearchTool?: boolean;
 }): Promise<string> {
-  const provider = getProvider(opts.provider);
-  const model = opts.model?.trim();
-  console.log(opts.prompt);
-  console.log(model);
+  const provider = getProvider(opts.provider) || "gemini";
+  const model = opts.model?.trim() || "gemini-2.5-flash";
+  const isDebug = process.env.DEBUG_LLM_ROUTER === "true";
+  const startedAt = Date.now();
+  let text = "";
+  let resolvedModel = model;
+
+  if (isDebug) {
+    console.warn("[llmRouter] request", {
+      provider,
+      model,
+      promptLength: opts.prompt.length,
+      useSearchTool: opts.useSearchTool ?? false,
+    });
+    console.warn("[llmRouter] prompt", opts.prompt);
+  }
 
   if (provider === "openai") {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    resolvedModel = model || "gpt-5-nano";
     const response = await openai.responses.create({
-      model: model || "gpt-5-nano",
+      model: resolvedModel,
       input: opts.prompt,
       instructions: opts.systemInstruction,
     });
-    return normalizeText(response.output_text || "");
-  }
-
-  if (provider === "anthropic") {
+    text = normalizeText(response.output_text || "");
+  } else if (provider === "anthropic") {
     const systemPrefix = opts.systemInstruction
       ? `System:\n${opts.systemInstruction}\n\n`
       : "";
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    resolvedModel = model || "claude-haiku-4-5";
     const msg = await anthropic.messages.create({
-      model: model || "claude-haiku-4-5",
+      model: resolvedModel,
       max_tokens: 2048,
       messages: [{ role: "user", content: systemPrefix + opts.prompt }],
     });
-    return normalizeText(msg);
+    text = normalizeText(msg);
+  } else {
+    const gemini = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    resolvedModel = model || "gemini-2.5-flash";
+    const response = await gemini.models.generateContent({
+      model: resolvedModel,
+      contents: opts.prompt,
+      config: {
+        tools: opts.useSearchTool ? [{ googleSearch: {} }] : [],
+        systemInstruction: opts.systemInstruction,
+      },
+    });
+
+    text = normalizeText(response.text || "");
   }
-  const gemini = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-  const response = await gemini.models.generateContent({
-    model: model || "gemini-2.5-flash",
-    contents: opts.prompt,
-    config: {
-      tools: opts.useSearchTool ? [{ googleSearch: {} }] : [],
-      systemInstruction: opts.systemInstruction,
-    },
-  });
-  return normalizeText(response.text || "");
+
+  if (isDebug) {
+    console.warn("[llmRouter] response", {
+      provider,
+      model: resolvedModel,
+      durationMs: Date.now() - startedAt,
+      outputLength: text.length,
+    });
+    console.warn("[llmRouter] output", text);
+  }
+
+  return text;
 }

@@ -60,8 +60,8 @@ export default async function handler(req: any, res: any) {
   `;
 
     const text = await generateText({
-      provider: "anthropic",
-      model: "claude-haiku-4-5",
+      provider: "gemini",
+      model: "gemini-2.5-flash",
       prompt,
       systemInstruction:
         "You are an elite travel concierge. You MUST use Google Search to verify that all places, hotels, restaurants, and attractions currently exist, are open, and fit the budget. Provide factual, accurate information.",
