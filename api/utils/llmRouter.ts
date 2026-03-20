@@ -36,8 +36,13 @@ export async function generateText(opts: {
 }): Promise<string> {
   const provider = getProvider(opts.provider);
   const model = opts.model?.trim();
-  console.log(opts.prompt);
-  console.log(model);
+  const isDebug = process.env.DEBUG_LLM_ROUTER === "true";
+
+  if (isDebug) {
+    console.log("LLM prompt:", opts.prompt);
+    console.log("LLM model:", model);
+    console.log("LLM provider:", provider);
+  }
 
   if (provider === "openai") {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
