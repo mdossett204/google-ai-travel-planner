@@ -1,4 +1,7 @@
 import { generateText } from "./utils/llmRouter.js";
+import { getGeminiVerificationTools } from "./tools/geminiTools.js";
+import { getOpenAIVerificationTools } from "./tools/openaiTools.js";
+import { getAnthropicVerificationTools } from "./tools/anthropicTools.js";
 
 function sendJson(res: any, status: number, data: any) {
   res.statusCode = status;
@@ -41,7 +44,7 @@ export default async function handler(req: any, res: any) {
     }
 
     const systemInstruction =
-      "You are an elite travel concierge. You MUST use Google Search to verify every single place, hotel, restaurant, and attraction. You are strictly forbidden from guessing or hallucinating addresses or URLs. If you cannot verify an address or URL via search, you MUST omit the link entirely. Do not provide fake or guessed links.";
+      "You are an elite travel concierge. You must verify factual place details before including them. You are strictly forbidden from guessing or hallucinating addresses or URLs. If you cannot verify an address or URL, you must omit it. Do not provide fake or guessed links.";
 
     const activityPrompt = `
     You are the 'Activity Planner Agent'.
@@ -84,7 +87,7 @@ export default async function handler(req: any, res: any) {
 
     const activityPlan = await generateText({
       provider: "gemini",
-      model: "gemini-2.5-flash",
+      model: "gemini-2.5-flash-lite",
       prompt: activityPrompt,
       systemInstruction,
       useSearchTool: true,
@@ -131,7 +134,7 @@ export default async function handler(req: any, res: any) {
 
     const logisticsPlan = await generateText({
       provider: "gemini",
-      model: "gemini-2.5-flash",
+      model: "gemini-2.5-flash-lite",
       prompt: logisticsPrompt,
       systemInstruction,
       useSearchTool: true,
@@ -148,17 +151,20 @@ export default async function handler(req: any, res: any) {
     Your task is to FACT-CHECK, VERIFY GEOGRAPHY, REMOVE WEAK ITEMS, and FORMAT the final itinerary.
 
     HARD RULES:
-    - You MUST use Google Search to verify hotels, restaurants, attractions, and official websites before including them.
+    - You MUST use the search_place tool to verify hotels, restaurants, attractions, and official websites before including them.
+    - You MUST call the search_place tool to verify specific hotels, restaurants, and attractions before keeping them in the final itinerary.
     - Keep the trip strictly inside the requested destination or region when one is provided.
     - Verify that every attraction, hotel, and restaurant exists and appears to be currently operating.
     - Remove or replace anything that seems fake, closed, duplicated, too far away, or not meaningfully aligned with the user preferences.
     - Do not include any guessed or unverified website.
-    - Only include a website if you are confident it is the official website.
+    - Only include a website if it comes directly from the search_place tool result.
+    - If the search_place tool does not return a website, omit the website entirely.
+    - Never invent, infer, rewrite, or supplement a website from model memory or general search.
     - Keep the itinerary relaxed and realistic. Avoid cramming too many stops into one day.
     - Restaurants must make geographic sense for that day.
     - Lodging must make geographic sense for the overall itinerary.
     - If a detail is uncertain, omit it instead of inventing it.
-    - If Google Search results contradict the draft plans, trust the search results and correct the itinerary.
+    - If tool results contradict the draft plans, trust the tool results and correct the itinerary.
 
     CRITICAL:
     - Do NOT output the raw planning notes.
@@ -176,7 +182,7 @@ export default async function handler(req: any, res: any) {
     - Estimated nightly price
     - Exact physical address
     - Why the location is convenient
-    - Official website only if verified
+    - Official website only if returned by the search_place tool
 
     ## 🍽️ Food & Restaurant Recommendations
     Organize food suggestions by day. For each day, recommend practical nearby options that match the stated food preferences. Include:
@@ -185,7 +191,7 @@ export default async function handler(req: any, res: any) {
     - Estimated price level
     - Exact physical address
     - Why it fits that day's route
-    - Official website only if verified
+    - Official website only if returned by the search_place tool
 
     ## 📅 Day-by-Day Itinerary
     For each day include morning, afternoon, and evening.
@@ -198,13 +204,36 @@ export default async function handler(req: any, res: any) {
     Include concise, destination-specific tips for packing, local etiquette, safety, timing, or reservations.
   `;
 
+    // Verification model options:
+    // Gemini:
     const itinerary = await generateText({
       provider: "gemini",
       model: "gemini-2.5-flash",
       prompt: verifyPrompt,
       systemInstruction,
-      useSearchTool: true,
+      useSearchTool: false,
+      geminiTools: getGeminiVerificationTools(),
     });
+    //
+    // OpenAI:
+    // const itinerary = await generateText({
+    //   provider: "openai",
+    //   model: "gpt-5.1",
+    //   prompt: verifyPrompt,
+    //   systemInstruction,
+    //   useSearchTool: false,
+    //   openaiTools: getOpenAIVerificationTools(),
+    // });
+    //
+    // Anthropic:
+    // const itinerary = await generateText({
+    //   provider: "anthropic",
+    //   model: "claude-haiku-4-5",
+    //   prompt: verifyPrompt,
+    //   systemInstruction,
+    //   useSearchTool: false,
+    //   anthropicTools: getAnthropicVerificationTools(),
+    // });
 
     return sendJson(res, 200, {
       itinerary: itinerary || activityPlan,
