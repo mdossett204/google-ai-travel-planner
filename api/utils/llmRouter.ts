@@ -7,9 +7,7 @@ import {
   type GeminiToolDefinition,
 } from "../tools/geminiTools.js";
 import { executeOpenAITool } from "../tools/openaiTools.js";
-import {
-  executeAnthropicTool,
-} from "../tools/anthropicTools.js";
+import { executeAnthropicTool } from "../tools/anthropicTools.js";
 
 export type LlmProvider = "openai" | "anthropic" | "gemini";
 
@@ -148,15 +146,15 @@ export async function generateText(opts: {
   let text = "";
   let resolvedModel = model;
 
-  // if (isDebug) {
-  //   console.warn("[llmRouter] request", {
-  //     provider,
-  //     model,
-  //     promptLength: opts.prompt.length,
-  //     useSearchTool: opts.useSearchTool ?? false,
-  //   });
-  //   console.warn("[llmRouter] prompt", opts.prompt);
-  // }
+  if (isDebug) {
+    console.warn("[llmRouter] request", {
+      provider,
+      model,
+      promptLength: opts.prompt.length,
+      useSearchTool: opts.useSearchTool ?? false,
+    });
+    console.warn("[llmRouter] prompt", opts.prompt);
+  }
 
   if (provider === "openai") {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
