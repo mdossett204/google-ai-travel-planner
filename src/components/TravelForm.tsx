@@ -15,17 +15,57 @@ const defaultFormData: TravelFormData = {
   travelers: "",
   budget: {
     lodging: "",
-    transportation: "",
+    localTransportation: "",
     food: "",
     misc: "",
   },
   primaryGoal: [],
-  foodPreferences: "",
-  activityPreferences: "",
-  transportation: [],
-  locations: "",
-  mustSeeLocations: "",
+  foodPreferences: {
+    dietaryRestrictions: [],
+    cuisineInterests: [],
+    diningStyle: [],
+    foodPriority: "Nice to Have",
+  },
+  lodgingPreferences: {
+    lodgingTypes: [],
+  },
+  localTransportation: [],
+  preferredLocation: {
+    country: "",
+    stateOrProvince: "",
+    city: "",
+  },
+  attractionInterests: "",
 };
+
+function buildInitialFormData(
+  initialData?: TravelFormData | null,
+): TravelFormData {
+  if (!initialData) {
+    return defaultFormData;
+  }
+
+  return {
+    ...defaultFormData,
+    ...initialData,
+    budget: {
+      ...defaultFormData.budget,
+      ...initialData.budget,
+    },
+    foodPreferences: {
+      ...defaultFormData.foodPreferences,
+      ...initialData.foodPreferences,
+    },
+    lodgingPreferences: {
+      ...defaultFormData.lodgingPreferences,
+      ...initialData.lodgingPreferences,
+    },
+    preferredLocation: {
+      ...defaultFormData.preferredLocation,
+      ...initialData.preferredLocation,
+    },
+  };
+}
 
 export default function TravelForm({
   onSubmit,
@@ -33,7 +73,7 @@ export default function TravelForm({
   initialData,
 }: TravelFormProps) {
   const [formData, setFormData] = useState<TravelFormData>(
-    initialData || defaultFormData,
+    buildInitialFormData(initialData),
   );
 
   const handleChange = (
@@ -44,7 +84,7 @@ export default function TravelForm({
   };
 
   const handleArrayToggle = (
-    field: "primaryGoal" | "transportation" | "timeOfYear",
+    field: "primaryGoal" | "localTransportation" | "timeOfYear",
     value: string,
   ) => {
     setFormData((prev) => {
@@ -54,6 +94,64 @@ export default function TravelForm({
       } else {
         return { ...prev, [field]: [...current, value] };
       }
+    });
+  };
+
+  const handlePreferredLocationChange = (
+    field: "country" | "stateOrProvince" | "city",
+    value: string,
+  ) => {
+    setFormData((prev) => ({
+      ...prev,
+      preferredLocation: {
+        ...prev.preferredLocation,
+        [field]: value,
+      },
+    }));
+  };
+
+  const handleFoodArrayToggle = (
+    field: "dietaryRestrictions" | "cuisineInterests" | "diningStyle",
+    value: string,
+  ) => {
+    setFormData((prev) => {
+      const current = prev.foodPreferences[field] || [];
+      return {
+        ...prev,
+        foodPreferences: {
+          ...prev.foodPreferences,
+          [field]: current.includes(value)
+            ? current.filter((item) => item !== value)
+            : [...current, value],
+        },
+      };
+    });
+  };
+
+  const handleFoodPriorityChange = (
+    value: "Not Important" | "Nice to Have" | "Major Trip Focus",
+  ) => {
+    setFormData((prev) => ({
+      ...prev,
+      foodPreferences: {
+        ...prev.foodPreferences,
+        foodPriority: value,
+      },
+    }));
+  };
+
+  const handleLodgingTypeToggle = (value: string) => {
+    setFormData((prev) => {
+      const current = prev.lodgingPreferences.lodgingTypes || [];
+      return {
+        ...prev,
+        lodgingPreferences: {
+          ...prev.lodgingPreferences,
+          lodgingTypes: current.includes(value)
+            ? current.filter((item) => item !== value)
+            : [...current, value],
+        },
+      };
     });
   };
 
@@ -70,6 +168,7 @@ export default function TravelForm({
     "Rental Car",
     "Walking/Biking",
     "Taxis/Rideshare",
+    "Own Car",
   ];
   const monthOptions = [
     "Jan",
@@ -84,6 +183,44 @@ export default function TravelForm({
     "Oct",
     "Nov",
     "Dec",
+  ];
+  const dietaryRestrictionOptions = [
+    "Vegan",
+    "Vegetarian",
+    "Gluten-Free",
+    "Dairy-Free",
+    "Nut-Free",
+    "Halal",
+    "Kosher",
+    "Paleo",
+    "Carnivore",
+    "No Restrictions",
+  ];
+  const cuisineInterestOptions = [
+    "Seafood",
+    "Regional Specialties",
+    "Ethnic",
+    "Street Food",
+    "Cafe/Bakery",
+    "No Preference",
+  ];
+  const diningStyleOptions = [
+    "Casual",
+    "Quick Meals",
+    "Family-Friendly",
+    "Scenic Dining",
+    "Fine Dining",
+  ];
+  const foodPriorityOptions: Array<
+    "Not Important" | "Nice to Have" | "Major Trip Focus"
+  > = ["Not Important", "Nice to Have", "Major Trip Focus"];
+  const lodgingTypeOptions = [
+    "Hotel",
+    "Boutique Hotel",
+    "Vacation Rental",
+    "Bed & Breakfast",
+    "Resort",
+    "Hostel",
   ];
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -176,8 +313,12 @@ export default function TravelForm({
               htmlFor="travelers"
               className="block text-sm font-medium text-slate-700"
             >
-              Travelers
+              Travel Style
             </label>
+            <p className="text-xs text-slate-500">
+              This describes who the trip is designed for and how the pacing
+              should feel.
+            </p>
             <select
               id="travelers"
               name="travelers"
@@ -189,10 +330,16 @@ export default function TravelForm({
               <option value="" disabled>
                 Select...
               </option>
-              <option value="Solo">Solo</option>
-              <option value="Couple">Couple</option>
-              <option value="Family">Family</option>
-              <option value="Group of Friends">Group of Friends</option>
+              <option value="Solo">Solo - independent, flexible pacing</option>
+              <option value="Couple">
+                Couple - scenic, shared, lower-friction flow
+              </option>
+              <option value="Family">
+                Family - simpler logistics, broader appeal
+              </option>
+              <option value="Friends">
+                Friends - social, energetic, group-friendly pacing
+              </option>
             </select>
           </div>
 
@@ -226,8 +373,11 @@ export default function TravelForm({
               </div>
               <div className="space-y-1">
                 <label className="text-xs text-slate-500">
-                  Transportation/Flights (total)
+                  Local Transportation (total)
                 </label>
+                <p className="text-xs text-slate-400">
+                  Once you are already at the destination.
+                </p>
                 <div className="relative">
                   <span className="absolute left-3 top-2.5 text-slate-500">
                     $
@@ -235,15 +385,18 @@ export default function TravelForm({
                   <input
                     type="number"
                     min="0"
-                    value={formData.budget.transportation}
+                    value={formData.budget.localTransportation}
                     onChange={(e) =>
                       setFormData((p) => ({
                         ...p,
-                        budget: { ...p.budget, transportation: e.target.value },
+                        budget: {
+                          ...p.budget,
+                          localTransportation: e.target.value,
+                        },
                       }))
                     }
                     className="w-full rounded-xl border border-slate-300 bg-white pl-8 pr-4 py-2 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
-                    placeholder="e.g. 500"
+                    placeholder="e.g. 120"
                   />
                 </div>
               </div>
@@ -321,19 +474,25 @@ export default function TravelForm({
 
           <div className="space-y-3 md:col-span-2">
             <label className="block text-sm font-medium text-slate-700">
-              Transportation{" "}
+              Local Transportation{" "}
               <span className="text-slate-400 font-normal">
                 (Select multiple)
               </span>
             </label>
+            <p className="text-xs text-slate-500">
+              Choose how you want to move around after arriving at the
+              destination.
+            </p>
             <div className="flex flex-wrap gap-2">
               {transportOptions.map((option) => (
                 <button
                   key={option}
                   type="button"
-                  onClick={() => handleArrayToggle("transportation", option)}
+                  onClick={() =>
+                    handleArrayToggle("localTransportation", option)
+                  }
                   className={`px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${
-                    formData.transportation.includes(option)
+                    formData.localTransportation.includes(option)
                       ? "bg-emerald-100 border-emerald-500 text-emerald-800"
                       : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
                   }`}
@@ -347,83 +506,187 @@ export default function TravelForm({
 
         <div className="space-y-4 pt-4 border-t border-slate-100">
           <div className="space-y-2">
-            <label
-              htmlFor="locations"
-              className="block text-sm font-medium text-slate-700"
-            >
-              Preferred Locations{" "}
-              <span className="text-slate-400 font-normal">(Optional)</span>
+            <label className="block text-sm font-medium text-slate-700">
+              Preferred Location
             </label>
             <p className="text-xs text-slate-500 mb-2">
-              You can suggest multiple options (e.g., "Japan or South Korea")
-              and we'll pick the best one for your budget and season.
+              Country and state/province are required. City is optional if you
+              want the planner to choose the best fit within that region.
             </p>
-            <input
-              type="text"
-              id="locations"
-              name="locations"
-              value={formData.locations}
-              onChange={handleChange}
-              placeholder="e.g., Japan or South Korea, Europe..."
-              className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
-            />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <input
+                type="text"
+                value={formData.preferredLocation.country}
+                onChange={(e) =>
+                  handlePreferredLocationChange("country", e.target.value)
+                }
+                required
+                placeholder="Country"
+                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
+              />
+              <input
+                type="text"
+                value={formData.preferredLocation.stateOrProvince}
+                onChange={(e) =>
+                  handlePreferredLocationChange(
+                    "stateOrProvince",
+                    e.target.value,
+                  )
+                }
+                required
+                placeholder="State / Province"
+                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
+              />
+              <input
+                type="text"
+                value={formData.preferredLocation.city}
+                onChange={(e) =>
+                  handlePreferredLocationChange("city", e.target.value)
+                }
+                placeholder="City (optional)"
+                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
+              />
+            </div>
           </div>
 
           <div className="space-y-2">
             <label
-              htmlFor="mustSeeLocations"
+              htmlFor="attractionInterests"
               className="block text-sm font-medium text-slate-700"
             >
-              Must-See Locations{" "}
+              Attractions of Interest{" "}
               <span className="text-slate-400 font-normal">(Optional)</span>
             </label>
             <input
               type="text"
-              id="mustSeeLocations"
-              name="mustSeeLocations"
-              value={formData.mustSeeLocations}
+              id="attractionInterests"
+              name="attractionInterests"
+              value={formData.attractionInterests}
               onChange={handleChange}
-              placeholder="e.g., Greece and France, or Eiffel Tower..."
+              placeholder="e.g., art museums, skyline viewpoints, historic district..."
               className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
             />
           </div>
 
-          <div className="space-y-2">
-            <label
-              htmlFor="foodPreferences"
-              className="block text-sm font-medium text-slate-700"
-            >
+          <div className="space-y-4">
+            <label className="block text-sm font-medium text-slate-700">
               Food Preferences
             </label>
-            <input
-              type="text"
-              id="foodPreferences"
-              name="foodPreferences"
-              value={formData.foodPreferences}
-              onChange={handleChange}
-              required
-              placeholder="e.g., Vegetarian, Local street food, Fine dining..."
-              className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
-            />
+
+            <div className="space-y-2">
+              <p className="text-xs text-slate-500">Dietary restrictions</p>
+              <div className="flex flex-wrap gap-2">
+                {dietaryRestrictionOptions.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() =>
+                      handleFoodArrayToggle("dietaryRestrictions", option)
+                    }
+                    className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${
+                      formData.foodPreferences.dietaryRestrictions.includes(
+                        option,
+                      )
+                        ? "bg-emerald-100 border-emerald-500 text-emerald-800"
+                        : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
+                    }`}
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-xs text-slate-500">Cuisine interests</p>
+              <div className="flex flex-wrap gap-2">
+                {cuisineInterestOptions.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() =>
+                      handleFoodArrayToggle("cuisineInterests", option)
+                    }
+                    className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${
+                      formData.foodPreferences.cuisineInterests.includes(option)
+                        ? "bg-emerald-100 border-emerald-500 text-emerald-800"
+                        : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
+                    }`}
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-xs text-slate-500">Dining style</p>
+              <div className="flex flex-wrap gap-2">
+                {diningStyleOptions.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => handleFoodArrayToggle("diningStyle", option)}
+                    className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${
+                      formData.foodPreferences.diningStyle.includes(option)
+                        ? "bg-emerald-100 border-emerald-500 text-emerald-800"
+                        : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
+                    }`}
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-xs text-slate-500">Food importance</p>
+              <div className="flex flex-wrap gap-2">
+                {foodPriorityOptions.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => handleFoodPriorityChange(option)}
+                    className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${
+                      formData.foodPreferences.foodPriority === option
+                        ? "bg-emerald-100 border-emerald-500 text-emerald-800"
+                        : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
+                    }`}
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
 
-          <div className="space-y-2">
-            <label
-              htmlFor="activityPreferences"
-              className="block text-sm font-medium text-slate-700"
-            >
-              Activity Preferences
+          <div className="space-y-3">
+            <label className="block text-sm font-medium text-slate-700">
+              Lodging Preferences{" "}
+              <span className="text-slate-400 font-normal">
+                (Select one or more)
+              </span>
             </label>
-            <input
-              type="text"
-              id="activityPreferences"
-              name="activityPreferences"
-              value={formData.activityPreferences}
-              onChange={handleChange}
-              required
-              placeholder="e.g., Museums, Hiking, Shopping..."
-              className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
-            />
+            <p className="text-xs text-slate-500">
+              Tell us what kinds of places you prefer staying in once you are
+              at the destination.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {lodgingTypeOptions.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => handleLodgingTypeToggle(option)}
+                  className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${
+                    formData.lodgingPreferences.lodgingTypes.includes(option)
+                      ? "bg-emerald-100 border-emerald-500 text-emerald-800"
+                      : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
+                  }`}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
