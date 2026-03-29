@@ -1,22 +1,39 @@
 // NOTE: LLM calls are moving behind serverless API routes.
 
+export interface FoodPreferences {
+  dietaryRestrictions: string[];
+  cuisineInterests: string[];
+  diningStyle: string[];
+  foodPriority: "Not Important" | "Nice to Have" | "Major Trip Focus";
+}
+
+export interface PreferredLocation {
+  country: string;
+  stateOrProvince: string;
+  city: string;
+}
+
+export interface LodgingPreferences {
+  lodgingTypes: string[];
+}
+
 export interface TravelFormData {
   timeOfYear: string[];
   durationValue: number | "";
   durationUnit: "days" | "weeks";
-  travelers: string;
+  travelers: "Solo" | "Couple" | "Family" | "Friends" | "";
   budget: {
     lodging: string;
-    transportation: string;
+    localTransportation: string;
     food: string;
     misc: string;
   };
   primaryGoal: string[];
-  foodPreferences: string;
-  activityPreferences: string;
-  transportation: string[];
-  locations: string;
-  mustSeeLocations: string;
+  foodPreferences: FoodPreferences;
+  lodgingPreferences: LodgingPreferences;
+  localTransportation: string[];
+  preferredLocation: PreferredLocation;
+  attractionInterests: string;
 }
 
 export interface Recommendation {

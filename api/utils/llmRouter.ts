@@ -7,19 +7,17 @@ import {
   type GeminiToolDefinition,
 } from "../tools/geminiTools.js";
 import { executeOpenAITool } from "../tools/openaiTools.js";
-import {
-  executeAnthropicTool,
-} from "../tools/anthropicTools.js";
+import { executeAnthropicTool } from "../tools/anthropicTools.js";
 
 export type LlmProvider = "openai" | "anthropic" | "gemini";
 
 const PROVIDERS: LlmProvider[] = ["openai", "anthropic", "gemini"];
-const MAX_GEMINI_TOOL_ITERATIONS = 15;
-const MAX_GEMINI_TOOL_CALLS = 30;
-const MAX_OPENAI_TOOL_ITERATIONS = 15;
-const MAX_OPENAI_TOOL_CALLS = 30;
-const MAX_ANTHROPIC_TOOL_ITERATIONS = 15;
-const MAX_ANTHROPIC_TOOL_CALLS = 30;
+const MAX_GEMINI_TOOL_ITERATIONS = 10;
+const MAX_GEMINI_TOOL_CALLS = 20;
+const MAX_OPENAI_TOOL_ITERATIONS = 10;
+const MAX_OPENAI_TOOL_CALLS = 20;
+const MAX_ANTHROPIC_TOOL_ITERATIONS = 3;
+const MAX_ANTHROPIC_TOOL_CALLS = 5;
 const LLM_MAX_RETRIES = 3;
 const LLM_RETRY_BASE_DELAY_MS = 1500;
 const GEMINI_MIN_INTERVAL_MS = 6000;
@@ -131,6 +129,156 @@ function normalizeText(input: any): string {
   return text;
 }
 
+const TOOL_LIMIT_FALLBACK_PROMPT =
+  "Finish the best possible answer using only the information already available. Do not call any more tools. Prefer omission over guessing.";
+
+function getToolLimitFallbackPrompt(provider: string, maxToolCalls: number) {
+  return `Tool use has reached the limit (${maxToolCalls}) for ${provider}. ${TOOL_LIMIT_FALLBACK_PROMPT}`;
+}
+
+async function finalizeOpenAIWithoutTools({
+  openai,
+  model,
+  instructions,
+  input,
+  providerLabel,
+  maxToolCalls,
+  isDebug,
+}: {
+  openai: OpenAI;
+  model: string;
+  instructions?: string;
+  input: Responses.ResponseInputItem[];
+  providerLabel?: string;
+  maxToolCalls?: number;
+  isDebug: boolean;
+}) {
+  const content =
+    providerLabel && maxToolCalls
+      ? getToolLimitFallbackPrompt(providerLabel, maxToolCalls)
+      : TOOL_LIMIT_FALLBACK_PROMPT;
+
+  const response = await withLlmRetry({
+    provider: "openai",
+    model,
+    isDebug,
+    fn: () =>
+      openai.responses.create({
+        model,
+        instructions,
+        input: [
+          ...input,
+          {
+            role: "user",
+            content,
+          },
+        ],
+      }),
+  });
+
+  return normalizeText(response.output_text || "");
+}
+
+async function finalizeAnthropicWithoutTools({
+  anthropic,
+  model,
+  messages,
+  providerLabel,
+  maxToolCalls,
+  reason,
+  isDebug,
+}: {
+  anthropic: Anthropic;
+  model: string;
+  messages: Anthropic.MessageParam[];
+  providerLabel?: string;
+  maxToolCalls?: number;
+  reason?: "tool-limit-hit" | "iteration-limit-hit" | "loop-finalize";
+  isDebug: boolean;
+}) {
+  const content =
+    providerLabel && maxToolCalls
+      ? getToolLimitFallbackPrompt(providerLabel, maxToolCalls)
+      : TOOL_LIMIT_FALLBACK_PROMPT;
+
+  if (isDebug) {
+    console.warn("[llmRouter] anthropic-finalize-without-tools", {
+      model,
+      providerLabel: providerLabel || "anthropic",
+      maxToolCalls: maxToolCalls ?? null,
+      messageCount: messages.length,
+      reason: reason || "loop-finalize",
+    });
+  }
+
+  const msg = await withLlmRetry({
+    provider: "anthropic",
+    model,
+    isDebug,
+    fn: () =>
+      anthropic.messages.create({
+        model,
+        max_tokens: 2048,
+        messages: [
+          ...messages,
+          {
+            role: "user",
+            content,
+          },
+        ],
+      }),
+  });
+
+  return normalizeText(msg);
+}
+
+async function finalizeGeminiWithoutTools({
+  gemini,
+  model,
+  contents,
+  systemInstruction,
+  providerLabel,
+  maxToolCalls,
+  isDebug,
+}: {
+  gemini: GoogleGenAI;
+  model: string;
+  contents: any[];
+  systemInstruction?: string;
+  providerLabel?: string;
+  maxToolCalls?: number;
+  isDebug: boolean;
+}) {
+  const content =
+    providerLabel && maxToolCalls
+      ? getToolLimitFallbackPrompt(providerLabel, maxToolCalls)
+      : TOOL_LIMIT_FALLBACK_PROMPT;
+
+  const response = await withLlmRetry({
+    provider: "gemini",
+    model,
+    isDebug,
+    fn: async () => {
+      await waitForGeminiSlot();
+      return gemini.models.generateContent({
+        model,
+        contents: [
+          ...contents,
+          {
+            role: "user",
+            parts: [{ text: content }],
+          },
+        ],
+        config: {
+          systemInstruction,
+        },
+      });
+    },
+  });
+
+  return normalizeText(response.text || "");
+}
+
 export async function generateText(opts: {
   provider?: string;
   model?: string;
@@ -228,7 +376,6 @@ export async function generateText(opts: {
             toolNames: functionCalls.map((item) => item.name),
           });
         }
-
         if (totalToolCalls > MAX_OPENAI_TOOL_CALLS) {
           if (isDebug) {
             console.warn("[llmRouter] openai-tool-call-limit-hit", {
@@ -237,9 +384,16 @@ export async function generateText(opts: {
               maxToolCalls: MAX_OPENAI_TOOL_CALLS,
             });
           }
-          throw new Error(
-            `OpenAI exceeded the tool call limit (${MAX_OPENAI_TOOL_CALLS}).`,
-          );
+          text = await finalizeOpenAIWithoutTools({
+            openai,
+            model: resolvedModel,
+            instructions: opts.systemInstruction,
+            input: inputItems,
+            providerLabel: "OpenAI",
+            maxToolCalls: MAX_OPENAI_TOOL_CALLS,
+            isDebug,
+          });
+          break;
         }
 
         const toolOutputs: OpenAIFunctionCallOutputInputItem[] = [];
@@ -274,6 +428,16 @@ export async function generateText(opts: {
         }
 
         inputItems = [...inputItems, ...outputItems, ...toolOutputs];
+      }
+
+      if (!text) {
+        text = await finalizeOpenAIWithoutTools({
+          openai,
+          model: resolvedModel,
+          instructions: opts.systemInstruction,
+          input: inputItems,
+          isDebug,
+        });
       }
     }
   } else if (provider === "anthropic") {
@@ -347,7 +511,6 @@ export async function generateText(opts: {
             toolNames: toolUses.map((item) => item.name),
           });
         }
-
         if (totalToolCalls > MAX_ANTHROPIC_TOOL_CALLS) {
           if (isDebug) {
             console.warn("[llmRouter] anthropic-tool-call-limit-hit", {
@@ -356,9 +519,16 @@ export async function generateText(opts: {
               maxToolCalls: MAX_ANTHROPIC_TOOL_CALLS,
             });
           }
-          throw new Error(
-            `Anthropic exceeded the tool call limit (${MAX_ANTHROPIC_TOOL_CALLS}).`,
-          );
+          text = await finalizeAnthropicWithoutTools({
+            anthropic,
+            model: resolvedModel,
+            messages,
+            providerLabel: "Anthropic",
+            maxToolCalls: MAX_ANTHROPIC_TOOL_CALLS,
+            reason: "tool-limit-hit",
+            isDebug,
+          });
+          break;
         }
 
         const toolResultBlocks: Anthropic.ToolResultBlockParam[] = [];
@@ -399,6 +569,16 @@ export async function generateText(opts: {
             content: toolResultBlocks,
           },
         ];
+      }
+
+      if (!text) {
+        text = await finalizeAnthropicWithoutTools({
+          anthropic,
+          model: resolvedModel,
+          messages,
+          reason: totalToolCalls > 0 ? "iteration-limit-hit" : "loop-finalize",
+          isDebug,
+        });
       }
     }
   } else {
@@ -489,7 +669,6 @@ export async function generateText(opts: {
               .filter(Boolean),
           });
         }
-
         if (totalToolCalls > MAX_GEMINI_TOOL_CALLS) {
           if (isDebug && hasGeminiFunctionTools) {
             console.warn("[llmRouter] gemini-tool-call-limit-hit", {
@@ -498,9 +677,16 @@ export async function generateText(opts: {
               maxToolCalls: MAX_GEMINI_TOOL_CALLS,
             });
           }
-          throw new Error(
-            `Gemini exceeded the tool call limit (${MAX_GEMINI_TOOL_CALLS}).`,
-          );
+          text = await finalizeGeminiWithoutTools({
+            gemini,
+            model: resolvedModel,
+            contents,
+            systemInstruction: opts.systemInstruction,
+            providerLabel: "Gemini",
+            maxToolCalls: MAX_GEMINI_TOOL_CALLS,
+            isDebug,
+          });
+          break;
         }
 
         const toolResponses = [];
@@ -544,6 +730,16 @@ export async function generateText(opts: {
             parts: toolResponses,
           },
         ];
+      }
+
+      if (!text) {
+        text = await finalizeGeminiWithoutTools({
+          gemini,
+          model: resolvedModel,
+          contents,
+          systemInstruction: opts.systemInstruction,
+          isDebug,
+        });
       }
     }
   }
