@@ -1,4 +1,12 @@
-import { generateText } from "./utils/llmRouter.js";
+import {
+  assertProviderApiKeysConfigured,
+  generateText,
+  LlmConfigurationError,
+} from "./utils/llmRouter.js";
+import {
+  RequestValidationError,
+  validateTravelFormData,
+} from "./utils/requestValidation.js";
 import { formatFoodPreferences } from "./utils/foodPreferences.js";
 import { formatLodgingPreferences } from "./utils/lodgingPreferences.js";
 import { formatPreferredLocation, formatTravelerType } from "./utils/tripContext.js";
@@ -47,7 +55,9 @@ export default async function handler(req: any, res: any) {
     return sendJson(res, 405, { error: "Method not allowed" });
 
   try {
-    const data = await readJsonBody(req);
+    assertProviderApiKeysConfigured(["gemini"]);
+
+    const data = validateTravelFormData(await readJsonBody(req));
     const foodPreferences = formatFoodPreferences(data.foodPreferences || {});
     const lodgingPreferences = formatLodgingPreferences(
       data.lodgingPreferences || {},
@@ -206,6 +216,12 @@ export default async function handler(req: any, res: any) {
     }
   } catch (err) {
     console.error(err);
+    if (err instanceof RequestValidationError) {
+      return sendJson(res, 400, { error: err.message });
+    }
+    if (err instanceof LlmConfigurationError) {
+      return sendJson(res, 500, { error: err.message });
+    }
     return sendJson(res, 500, { error: "Server error" });
   }
 }

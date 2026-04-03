@@ -1,6 +1,6 @@
 import React from 'react';
 import { Recommendation } from '../services/geminiService';
-import { MapPin, CheckCircle2, ArrowRight, Wallet, Calendar } from 'lucide-react';
+import { CheckCircle2, ArrowRight, Wallet, Calendar } from 'lucide-react';
 
 interface RecommendationsProps {
   recommendations: Recommendation[];
@@ -26,10 +26,12 @@ export default function Recommendations({ recommendations, onSelect, onBack }: R
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {recommendations.map((rec) => (
-          <div
+          <button
             key={rec.id}
-            className="bg-white rounded-2xl border border-slate-200 overflow-hidden hover:shadow-xl transition-all duration-300 flex flex-col group cursor-pointer"
+            type="button"
+            className="bg-white rounded-2xl border border-slate-200 overflow-hidden hover:shadow-xl transition-all duration-300 flex flex-col group cursor-pointer text-left focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2"
             onClick={() => onSelect(rec)}
+            aria-label={`View itinerary for ${rec.title}`}
           >
             <div className="h-48 bg-slate-100 relative overflow-hidden">
               <img
@@ -70,14 +72,15 @@ export default function Recommendations({ recommendations, onSelect, onBack }: R
                 </div>
               </div>
 
-              <button
+              <div
                 className="w-full py-3 px-4 bg-slate-50 hover:bg-emerald-50 text-emerald-700 font-medium rounded-xl border border-slate-200 hover:border-emerald-200 transition-colors flex items-center justify-center gap-2 group-hover:bg-emerald-600 group-hover:text-white group-hover:border-emerald-600"
+                aria-hidden="true"
               >
                 <span>View Itinerary</span>
                 <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
-              </button>
+              </div>
             </div>
-          </div>
+          </button>
         ))}
       </div>
     </div>

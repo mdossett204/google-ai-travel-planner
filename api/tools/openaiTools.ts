@@ -1,5 +1,5 @@
 import type { Responses } from "openai/resources/responses/responses";
-import { searchTomTom } from "../utils/tomtomSearch.js";
+import { isTomTomResultMatch, searchTomTom } from "../utils/tomtomSearch.js";
 
 export interface OpenAIToolExecutionContext {
   name: string;
@@ -56,12 +56,27 @@ export async function executeOpenAITool({
       limit: 1,
     });
     const result = results[0] || null;
+    const isMatch = isTomTomResultMatch({
+      placeName,
+      locationHint,
+      result,
+    });
 
     if (process.env.DEBUG_LLM_ROUTER === "true") {
       console.warn("[openaiTools] search_place-result", {
         query,
+        isMatch,
         result,
       });
+    }
+
+    if (!isMatch) {
+      return {
+        ok: false,
+        query,
+        error: "Top search result did not match the requested place closely enough.",
+        result: null,
+      };
     }
 
     return {

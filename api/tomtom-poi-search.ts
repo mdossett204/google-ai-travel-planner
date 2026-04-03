@@ -1,4 +1,12 @@
-import { searchTomTom } from "./utils/tomtomSearch.js";
+import {
+  assertTomTomApiKeyConfigured,
+  searchTomTom,
+  TomTomConfigurationError,
+} from "./utils/tomtomSearch.js";
+import {
+  RequestValidationError,
+  validateTomTomPoiSearchRequest,
+} from "./utils/requestValidation.js";
 
 function sendJson(res: any, status: number, data: any) {
   res.statusCode = status;
@@ -32,18 +40,9 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const body = await readJsonBody(req);
-    const query = typeof body?.query === "string" ? body.query : "";
-    const limit =
-      typeof body?.limit === "number" && body.limit > 0 ? body.limit : 5;
-    const latitude =
-      typeof body?.latitude === "number" ? body.latitude : undefined;
-    const longitude =
-      typeof body?.longitude === "number" ? body.longitude : undefined;
-
-    if (!query.trim()) {
-      return sendJson(res, 400, { error: "Missing query." });
-    }
+    assertTomTomApiKeyConfigured();
+    const { query, limit, latitude, longitude } =
+      validateTomTomPoiSearchRequest(await readJsonBody(req));
 
     const results = await searchTomTom({
       query,
@@ -55,6 +54,12 @@ export default async function handler(req: any, res: any) {
     return sendJson(res, 200, { results });
   } catch (err: any) {
     console.error(err);
+    if (err instanceof RequestValidationError) {
+      return sendJson(res, 400, { error: err.message });
+    }
+    if (err instanceof TomTomConfigurationError) {
+      return sendJson(res, 500, { error: err.message });
+    }
     return sendJson(res, 500, {
       error: err?.message || "TomTom search failed.",
     });

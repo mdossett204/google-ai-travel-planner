@@ -11,13 +11,21 @@ import { executeAnthropicTool } from "../tools/anthropicTools.js";
 
 export type LlmProvider = "openai" | "anthropic" | "gemini";
 
+export class LlmConfigurationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LlmConfigurationError";
+  }
+}
+
 const PROVIDERS: LlmProvider[] = ["openai", "anthropic", "gemini"];
+const MAX_TOOL_CALLS = 10;
 const MAX_GEMINI_TOOL_ITERATIONS = 10;
-const MAX_GEMINI_TOOL_CALLS = 20;
+const MAX_GEMINI_TOOL_CALLS = MAX_TOOL_CALLS;
 const MAX_OPENAI_TOOL_ITERATIONS = 10;
-const MAX_OPENAI_TOOL_CALLS = 20;
+const MAX_OPENAI_TOOL_CALLS = MAX_TOOL_CALLS;
 const MAX_ANTHROPIC_TOOL_ITERATIONS = 3;
-const MAX_ANTHROPIC_TOOL_CALLS = 5;
+const MAX_ANTHROPIC_TOOL_CALLS = MAX_TOOL_CALLS;
 const LLM_MAX_RETRIES = 3;
 const LLM_RETRY_BASE_DELAY_MS = 1500;
 const GEMINI_MIN_INTERVAL_MS = 6000;
@@ -116,6 +124,33 @@ function getProvider(input?: string): LlmProvider {
     .trim() as LlmProvider;
   if (PROVIDERS.includes(env)) return env;
   return "gemini";
+}
+
+function getProviderApiKeyEnvVar(provider: LlmProvider) {
+  switch (provider) {
+    case "openai":
+      return "OPENAI_API_KEY";
+    case "anthropic":
+      return "ANTHROPIC_API_KEY";
+    case "gemini":
+      return "GEMINI_API_KEY";
+  }
+}
+
+export function assertProviderApiKeyConfigured(provider: LlmProvider) {
+  const envVar = getProviderApiKeyEnvVar(provider);
+  if (!process.env[envVar]?.trim()) {
+    throw new LlmConfigurationError(
+      `Server configuration error: missing ${envVar} for provider "${provider}".`,
+    );
+  }
+}
+
+export function assertProviderApiKeysConfigured(providers: LlmProvider[]) {
+  const uniqueProviders = [...new Set(providers)];
+  for (const provider of uniqueProviders) {
+    assertProviderApiKeyConfigured(provider);
+  }
 }
 
 function normalizeText(input: any): string {
@@ -290,6 +325,7 @@ export async function generateText(opts: {
   anthropicTools?: Anthropic.Tool[];
 }): Promise<string> {
   const provider = getProvider(opts.provider) || "gemini";
+  assertProviderApiKeyConfigured(provider);
   const model = opts.model?.trim() || "gemini-2.5-flash";
   const isDebug = process.env.DEBUG_LLM_ROUTER === "true";
   const startedAt = Date.now();

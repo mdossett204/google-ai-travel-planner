@@ -1,4 +1,4 @@
-import { searchTomTom } from "../utils/tomtomSearch.js";
+import { isTomTomResultMatch, searchTomTom } from "../utils/tomtomSearch.js";
 
 export interface GeminiToolDefinition {
   functionDeclarations: Array<{
@@ -65,12 +65,27 @@ export async function executeGeminiTool({
       limit: 1,
     });
     const result = results[0] || null;
+    const isMatch = isTomTomResultMatch({
+      placeName,
+      locationHint,
+      result,
+    });
 
     if (process.env.DEBUG_LLM_ROUTER === "true") {
       console.warn("[geminiTools] search_place-result", {
         query,
+        isMatch,
         result,
       });
+    }
+
+    if (!isMatch) {
+      return {
+        ok: false,
+        query,
+        error: "Top search result did not match the requested place closely enough.",
+        result: null,
+      };
     }
 
     return {

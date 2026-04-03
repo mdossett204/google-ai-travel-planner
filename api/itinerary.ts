@@ -1,7 +1,19 @@
-import { generateText } from "./utils/llmRouter.js";
+import {
+  assertProviderApiKeysConfigured,
+  generateText,
+  LlmConfigurationError,
+} from "./utils/llmRouter.js";
+import {
+  RequestValidationError,
+  validateItineraryRequest,
+} from "./utils/requestValidation.js";
 import { getGeminiVerificationTools } from "./tools/geminiTools.js";
 import { getOpenAIVerificationTools } from "./tools/openaiTools.js";
 import { getAnthropicVerificationTools } from "./tools/anthropicTools.js";
+import {
+  assertTomTomApiKeyConfigured,
+  TomTomConfigurationError,
+} from "./utils/tomtomSearch.js";
 import { formatFoodPreferences } from "./utils/foodPreferences.js";
 import { formatLodgingPreferences } from "./utils/lodgingPreferences.js";
 import {
@@ -54,9 +66,12 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const body = await readJsonBody(req);
-    const data = body?.data;
-    const recommendation = body?.recommendation;
+    assertProviderApiKeysConfigured(["gemini", "anthropic"]);
+    assertTomTomApiKeyConfigured();
+
+    const body = validateItineraryRequest(await readJsonBody(req));
+    const data = body.data;
+    const recommendation = body.recommendation;
     const foodPreferences = formatFoodPreferences(data?.foodPreferences || {});
     const lodgingPreferences = formatLodgingPreferences(
       data?.lodgingPreferences || {},
@@ -78,17 +93,14 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    const activitySystemInstruction =
-      "You are an elite travel concierge focused on drafting realistic activity flows. This stage is for activity planning only, not final verification. Use general destination knowledge, avoid web search, and do not include hotels, restaurants, exact addresses, URLs, or opening hours. Favor realistic pacing, geographic coherence, and practical local movement. Think briefly before responding but keep your output concise and strictly within the specified format.";
-
-    const logisticsSystemInstruction =
-      "You are an elite travel concierge focused on planning practical trip logistics around an existing activity flow. This stage is for drafting candidate lodging and food options only, not final verification. Use general destination knowledge, avoid web search, and do not include exact addresses, URLs, or opening hours. Prioritize geographic fit, transportation practicality, food preference fit, and budget realism. Lodging suggestions should be specific named properties only when they are well-known and plausible. Food suggestions may be either specific well-known venues or generalized area-based options when specificity is uncertain. Never invent precise facts to make a recommendation sound more certain than it is.";
+    const draftSystemInstruction =
+      "You are an elite travel concierge focused on drafting realistic trip plans before final verification. Use general destination knowledge only, avoid web search, and do not include exact addresses, URLs, or opening hours. Favor realistic pacing, geographic coherence, transportation practicality, and budget realism. Never invent precise facts to make a recommendation sound more certain than it is.";
 
     const ItinerarySystemInstruction =
       "You are an elite travel concierge. You must verify factual place details before including them. You are strictly forbidden from guessing or hallucinating addresses or URLs. If you cannot verify an address or URL, you must omit it. Do not provide fake or guessed links. Prefer options that maximize geographic coherence, preference fit, and realism over simply preserving draft items.";
 
-    const activityPrompt = `
-    You are the 'Activity Planner Agent'.
+    const draftPrompt = `
+    You are the 'Trip Planner Draft Agent'.
     Destination: ${recommendation.title}
     Preferred Location: ${preferredLocation}
     Trip Context: ${recommendation.description}
@@ -98,15 +110,26 @@ export default async function handler(req: any, res: any) {
     Primary Goal(s): ${data.primaryGoal?.length > 0 ? data.primaryGoal.join(", ") : "Any"}
     Attractions of Interest: ${data.attractionInterests || "None specified"}
     Local Transportation Preferences: ${data.localTransportation?.length > 0 ? data.localTransportation.join(", ") : "Any"}
+    Budget (Treat as upper limit, +/- 20% acceptable):
+      - Lodging: $${data.budget?.lodging || "Any"} per night
+      - Local Transportation: $${data.budget?.localTransportation || "Any"} total
+      - Food: $${data.budget?.food || "Any"} per day
+      - Miscellaneous/Activities: $${data.budget?.misc || "Any"} total
+    FOOD PREFERENCES
+    ${foodPreferences}
     LODGING PREFERENCES
     ${lodgingPreferences}
 
     TASK:
-    Create a day-by-day itinerary of ACTIVITIES ONLY.
-    Do NOT include hotels, restaurants, cafes, meal planning, or any food suggestions.
+    Create one combined trip-planning draft that includes:
+    1. A day-by-day activity itinerary
+    2. 2-3 candidate lodging options
+    3. Practical daily food suggestions near the activity flow
+
+    This is still a draft stage only. Do NOT verify facts, addresses, websites, or operating status.
 
     HARD RULES:
-    - Keep the itinerary strictly inside the specified preferred location.
+    - Keep the full trip strictly inside the specified preferred location.
     - Do NOT use web search in this stage. Use general destination knowledge and common travel patterns only.
     - Interpret duration primarily as trip days. Unless the input clearly means something else, assume approximate nights = max(days - 1, 0).
     - Produce one itinerary day per trip day when reasonable, but keep each day appropriately light for short trips.
@@ -121,124 +144,47 @@ export default async function handler(req: any, res: any) {
     - Each day should feel meaningfully different from the previous day in at least one dimension: area anchor, activity type, or energy level.
     - Let the traveler type shape the tone and pacing. For example, couples may benefit from more scenic, atmospheric, or leisurely transitions, while families or groups may need simpler logistics and lower friction.
     - Local transportation preferences should shape the plan. Favor compact, locally explorable areas and practical movement on foot, transit, or short rides unless longer travel is clearly justified.
-    - Treat lodging preferences as soft downstream guidance only. They may lightly influence the practicality of daily movement, but they should not override activity geography, pace, or the main trip goals.
     - If the stated local transportation preference is a poor fit for the destination, quietly adapt the daily movement style to the most practical local option without changing the overall trip character.
     - Do not recommend activities that are clearly implausible for the season, trip length, or traveler type.
     - Include at least one breathing-space or scenic/light block per day when possible.
     - If attraction interests are provided, treat broad categories such as parks, museums, or viewpoints as preference signals, and treat named attractions as specific requests. Only include them if they genuinely fit the requested destination and the daily geography.
     - Do not force filler attractions. If a day would otherwise feel thin, use a scenic stroll, waterfront time, old-town wandering, park time, market browsing, or free exploration block instead.
     - If there are not enough strong activities for a full day, reduce intensity and use fewer, better-spaced blocks rather than padding the itinerary.
-    - Do not include exact addresses, websites, opening hours, or verification commentary in this stage.
-
-    OUTPUT FORMAT:
-    Return plain text only using this exact planning format for each day:
-
-    DAY 1
-    Area Anchor: <main neighborhood or area>
-    Morning: <specific activity> | Area: <neighborhood> | Pace: <easy/moderate/strenuous> | Why it fits: <one short clause>
-    Afternoon: <specific activity> | Area: <neighborhood> | Pace: <easy/moderate/strenuous> | Why it fits: <one short clause>
-    Evening: <specific activity or light free-time block> | Area: <neighborhood> | Pace: <easy/moderate/strenuous> | Why it fits: <one short clause>
-    Daily Flow Note: <one sentence explaining why the sequence is geographically and emotionally relaxing>
-
-    EXAMPLE OUTPUT
-    DAY 1
-    Area Anchor: Downtown Asheville
-    Morning: Explore downtown Asheville's galleries, bookstores, and walkable blocks | Area: Downtown Asheville | Pace: easy | Why it fits: easy city-center orientation
-    Afternoon: Visit the River Arts District studios and nearby creative spaces | Area: River Arts District | Pace: moderate | Why it fits: one focused cultural cluster
-    Evening: Sunset walk at a nearby Blue Ridge Parkway overlook | Area: Blue Ridge Parkway edge | Pace: easy | Why it fits: light scenic finish
-    Daily Flow Note: This sequence keeps the day centered around Asheville with one natural shift from downtown culture to an easy mountain-view evening.
-
-    Repeat for each day only. Do not include markdown headings, hotels, restaurants, food suggestions, verification notes, or extra commentary.
-  `;
-
-    const activityPlan = await generateText({
-      provider: "gemini",
-      model: "gemini-2.5-flash",
-      prompt: activityPrompt,
-      systemInstruction: activitySystemInstruction,
-      useSearchTool: false,
-    });
-
-    const logisticsPrompt = `
-    You are the 'Logistics Coordinator Agent'.
-    Destination: ${recommendation.title}
-    Trip Context: ${recommendation.description}
-    Time of Year: ${timeOfYear}
-    Preferred Location: ${preferredLocation}
-    Travel Style: ${travelerType}
-    Local Transportation Preferences: ${data.localTransportation?.length > 0 ? data.localTransportation.join(", ") : "Any"}
-    Attractions of Interest: ${data.attractionInterests || "None specified"}
-
-    Here is the planned activity itinerary:
-    ${activityPlan}
-
-    User Preferences:
-    Budget (Treat as upper limit, +/- 20% acceptable):
-      - Lodging: $${data.budget?.lodging || "Any"} per night
-      - Local Transportation: $${data.budget?.localTransportation || "Any"} total
-      - Food: $${data.budget?.food || "Any"} per day
-    FOOD PREFERENCES
-    ${foodPreferences}
-    LODGING PREFERENCES
-    ${lodgingPreferences}
-
-    TASK:
-    Use the activity plan as the geographic backbone of the trip.
-    First infer the best general stay areas based on where the attractions cluster.
-    Then recommend lodging and food options that fit those areas, the food preferences, the local transportation preferences, and the stated budget.
-
-    HARD RULES:
-    - Recommend 2-3 lodging options only. Two is acceptable when the area or budget meaningfully limits strong choices; three is better when there are several clear fits.
-    - Choose lodging in this order of importance: overall fit to the activity geography, fit to the local transportation mode, budget realism, then fit to the travel style.
-    - Lodging must be chosen only after considering the overall attraction geography.
+    - Choose lodging after considering the overall attraction geography.
     - Lodging should be central to the activity areas already listed and should reduce daily transit friction.
-    - Lodging should be specific named properties.
+    - Recommend 2-3 lodging options only. Across lodging options, vary at least one of: neighborhood, price tier, or property type.
+    - Lodging should be specific named properties only when they are well-known and plausible.
     - Use lodging preferences as soft guidance unless they clearly conflict with geography or budget reality.
-    - Across lodging options, vary at least one of: neighborhood, price tier, or property type.
     - Restaurant or grocery choices must be geographically close to the same day's activities or the stay area for that night.
     - Respect dietary restrictions precisely as hard constraints.
     - Treat cuisine interests and dining style as soft preferences that should guide the tone of the recommendations.
     - Let food priority control how strongly food shapes the plan: if food priority is "Major Trip Focus", give food suggestions more weight; if it is "Nice to Have", balance food with geography; if it is "Not Important", prioritize geography and logistics first.
-    - Local transportation preferences must materially shape the recommendations. Favor places that are practical to reach from the planned activity areas using the likely local transport mode.
-    - The local transportation budget applies only after arrival at the destination.
-    - For walking or biking, keep lodging and food very close to the activity anchors and avoid recommendations that require repeated long transfers.
-    - For public transit, favor central stay areas and food options near practical transit corridors or dense walkable areas.
-    - For taxis or rideshare, modest dispersal is acceptable, but still avoid inefficient zig-zagging.
-    - For rental car or own car, favor lodging with practical driving access and food options that are easy to reach or park near without creating unnecessary detours.
-    - If the stated local transportation preference is impractical, switch to the most realistic local mode and optimize for geographic efficiency without explicitly calling out the change.
-    - Do NOT use web search in this stage.
-    - Do NOT include exact addresses, websites, or operating-status claims in this stage.
-    - Never invent unknown details. If you are unsure about a venue, keep the recommendation general rather than fabricating precision.
-    - A "well-known" lodging or food venue means a place that is broadly recognizable or highly plausible from general destination knowledge, not a niche business recalled uncertainly.
-    - If confidence is low on a specific lodging property, choose a best-known plausible named property rather than inventing details.
-    - If no plausible named property is appropriate, choose a well-known hotel brand or a central, commonly used property type in the area.
     - Keep food recommendations general at the venue or style level. Do not describe specific dishes or menu items in this stage.
-    - Food <Name> may be either a specific venue OR a descriptive area-based option such as "casual cafes near Shinjuku Station".
-    - Food recommendations may be either specific well-known venues or generalized area-based options when specificity is uncertain.
+    - Food suggestions may be either specific well-known venues or generalized area-based options when specificity is uncertain.
     - If confidence is low on a specific food venue, choose a generalized area-based option rather than inventing precise details.
+    - If confidence is low on a specific lodging property, choose a best-known plausible named property rather than inventing details.
+    - If no plausible named lodging property is appropriate, choose a well-known hotel brand or a central, commonly used property type in the area.
     - If the budget is tight, prefer simpler but well-located options over aspirational ones that add transit friction.
     - If the requested location and budget are in tension, keep the location fixed and move downmarket first: prefer simpler lodging, fewer paid meal recommendations, grocery options, and more transit-efficient choices before drifting outside the requested area.
     - Use food price tiers consistently: $ = under $15 per person, $$ = $15-$35 per person, $$$ = over $35 per person.
     - Distribute the daily food budget roughly across meals as follows when all three are recommended: 20% breakfast, 35% lunch, 45% dinner.
     - Breakfast is the first meal to skip if the day does not support three strong food recommendations.
     - You may recommend a local grocery store, market, or specialty food hall when that fits the budget, dietary needs, or logistics better than a restaurant.
-    - If a meal recommendation is skipped, you MUST include a short reason explaining why skipping is more practical.
+    - If a meal recommendation is skipped, include a short reason explaining why skipping is more practical.
     - If cuisine interests conflict with geography, dietary restrictions, or budget, prioritize geography and dietary safety first.
     - If the area has limited strong options, recommend fewer but better-fitting choices rather than forcing weak ones.
-    - If the activity itinerary is sparse or geographically unclear, infer a central, practical base area and keep recommendations tightly clustered.
-    - Avoid repeating the exact same food venue, grocery option, or lodging rationale across multiple meal slots or days unless repetition is clearly the most practical choice.
-    - Do NOT repeat the activity itinerary.
-
-    CONFLICT RESOLUTION ORDER
-    When constraints conflict, resolve them in this order:
-    1. Stay inside the requested location.
-    2. Respect dietary restrictions and basic feasibility.
-    3. Keep the activity geography and local transportation flow practical.
-    4. Stay close to the lodging and food budgets.
-    5. Apply cuisine interests, dining style, and lodging-type preferences.
+    - Do not include exact addresses, websites, opening hours, operating-status claims, or verification commentary in this stage.
 
     OUTPUT FORMAT:
     Return plain text only in this exact structure:
+
+    ACTIVITY PLAN
+    DAY 1
+    Area Anchor: <main neighborhood or area>
+    Morning: <specific activity> | Area: <neighborhood> | Pace: <easy/moderate/strenuous> | Why it fits: <one short clause>
+    Afternoon: <specific activity> | Area: <neighborhood> | Pace: <easy/moderate/strenuous> | Why it fits: <one short clause>
+    Evening: <specific activity or light free-time block> | Area: <neighborhood> | Pace: <easy/moderate/strenuous> | Why it fits: <one short clause>
+    Daily Flow Note: <one sentence explaining why the sequence is geographically and emotionally relaxing>
 
     LODGING OPTIONS
     - <Property Name> | Type: <hotel/boutique hotel/vacation rental/etc.> | Price: <estimated nightly price> | Area: <neighborhood> | Why convenient: <=12 words, must reference proximity to key activity area(s)> | Confidence: <high/medium/low>
@@ -249,40 +195,21 @@ export default async function handler(req: any, res: any) {
     - Lunch: <name or "Skip recommendation"> | Cuisine: <type or "N/A"> | Price: <estimated price or "N/A"> | Near: <activity or area> | Diet fit: <≤8 words, explicitly referencing dietary constraint or flexibility> | Skip reason: <short reason, <=12 words, or "N/A"> | Confidence: <high/medium/low>
     - Dinner: <name or "Skip recommendation"> | Cuisine: <type or "N/A"> | Price: <estimated price or "N/A"> | Near: <activity or area> | Diet fit: <≤8 words, explicitly referencing dietary constraint or flexibility> | Skip reason: <short reason, <=12 words, or "N/A"> | Confidence: <high/medium/low>
 
-    CONFIDENCE GUIDE
-    - Use "high" sparingly, only when the venue or property is a clearly strong fit from general knowledge.
-    - Use "medium" when selecting a plausible well-known property or venue without strong certainty about fit.
-    - Use "low" when relying on general area knowledge rather than a specific known venue.
-
-    EXAMPLE OUTPUT
-    LODGING OPTIONS
-    - Kimpton Hotel Arras | Type: hotel | Price: $260/night | Area: Downtown Asheville | Why convenient: central for downtown and River Arts access | Confidence: high
-    - Haywood Park Hotel | Type: boutique hotel | Price: $240/night | Area: Downtown Asheville | Why convenient: walkable base with low transit friction | Confidence: high
-    - Element Asheville Downtown | Type: hotel | Price: $210/night | Area: Downtown Asheville | Why convenient: practical base with easier budget fit | Confidence: medium
-
-    DAY 1 FOOD
-    - Breakfast: Skip recommendation | Cuisine: N/A | Price: N/A | Near: Downtown Asheville stay area | Diet fit: keeps the morning flexible | Skip reason: easy to grab near lodging | Confidence: high
-    - Lunch: casual counter-service lunch spot in the River Arts District | Cuisine: casual local lunch | Price: $ | Near: River Arts District | Diet fit: flexible and easy to adapt | Skip reason: N/A | Confidence: medium
-    - Dinner: local grocery store or prepared-food market near downtown | Cuisine: grocery / prepared foods | Price: $-$$ | Near: Downtown Asheville | Diet fit: useful for dietary flexibility and a lighter evening | Skip reason: N/A | Confidence: medium
-
-    Repeat the DAY N FOOD section for each day only. Do not include markdown headings or any other prose.
+    Repeat the DAY N blocks as needed. Do not include markdown headings or any other prose.
   `;
 
-    const logisticsPlan = await generateText({
+    const draftPlan = await generateText({
       provider: "gemini",
       model: "gemini-2.5-flash",
-      prompt: logisticsPrompt,
-      systemInstruction: logisticsSystemInstruction,
+      prompt: draftPrompt,
+      systemInstruction: draftSystemInstruction,
       useSearchTool: false,
     });
 
     const verifyPrompt = `
     You are the 'Verification & Formatting Concierge Agent'.
-    Here are the planned activities:
-    ${activityPlan}
-
-    Here are the planned logistics (hotels & food):
-    ${logisticsPlan}
+    Here is the combined trip-planning draft:
+    ${draftPlan}
 
     Your task is to FACT-CHECK, VERIFY GEOGRAPHY, REMOVE WEAK ITEMS, and FORMAT the final itinerary.
 
@@ -305,7 +232,7 @@ export default async function handler(req: any, res: any) {
     - Copy the website exactly as returned by the tool. Do not modify, shorten, or reformat it.
     - Never invent, infer, rewrite, or supplement a website from model memory or general search.
     - Keep the itinerary relaxed and realistic. Avoid cramming too many stops into one day.
-    - Do not add activities beyond what was in the approved activity plan.
+    - Do not add activities beyond what was in the draft plan.
     - Only edit activities for clarity, pacing notes, or geographic corrections.
     - Limit each day to a realistic number of major activities, typically 2-4, prioritizing flow over coverage.
     - Food and activity locations should generally be within a reasonable travel radius for the chosen transport mode, such as walkable clusters, short transit hops, or logical driving routes.
@@ -445,10 +372,19 @@ export default async function handler(req: any, res: any) {
     });
 
     return sendJson(res, 200, {
-      itinerary: itinerary || activityPlan,
+      itinerary: itinerary || draftPlan,
     });
   } catch (err) {
     console.error(err);
+    if (err instanceof RequestValidationError) {
+      return sendJson(res, 400, { error: err.message });
+    }
+    if (err instanceof LlmConfigurationError) {
+      return sendJson(res, 500, { error: err.message });
+    }
+    if (err instanceof TomTomConfigurationError) {
+      return sendJson(res, 500, { error: err.message });
+    }
     return sendJson(res, 500, { error: "Server error" });
   }
 }

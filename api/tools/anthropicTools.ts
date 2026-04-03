@@ -1,4 +1,4 @@
-import { searchTomTom } from "../utils/tomtomSearch.js";
+import { isTomTomResultMatch, searchTomTom } from "../utils/tomtomSearch.js";
 import type Anthropic from "@anthropic-ai/sdk";
 
 export interface AnthropicToolExecutionContext {
@@ -53,12 +53,27 @@ export async function executeAnthropicTool({
       limit: 1,
     });
     const result = results[0] || null;
+    const isMatch = isTomTomResultMatch({
+      placeName,
+      locationHint,
+      result,
+    });
 
     if (process.env.DEBUG_LLM_ROUTER === "true") {
       console.warn("[anthropicTools] search_place-result", {
         query,
+        isMatch,
         result,
       });
+    }
+
+    if (!isMatch) {
+      return {
+        ok: false,
+        query,
+        error: "Top search result did not match the requested place closely enough.",
+        result: null,
+      };
     }
 
     return {

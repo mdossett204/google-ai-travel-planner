@@ -20,6 +20,16 @@ export interface TomTomSearchResult {
   score: number | null;
 }
 
+interface TomTomSearchResponse {
+  results?: unknown[];
+}
+
+interface TomTomMatchOptions {
+  placeName: string;
+  locationHint?: string;
+  result: TomTomSearchResult | null;
+}
+
 const TOMTOM_MIN_INTERVAL_MS = 400;
 const TOMTOM_MAX_RETRIES = 3;
 const TOMTOM_RETRY_BASE_DELAY_MS = 1200;
@@ -33,10 +43,19 @@ const tomTomCache = new Map<
   { expiresAt: number; results: TomTomSearchResult[] }
 >();
 
-function getTomTomApiKey() {
+export class TomTomConfigurationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TomTomConfigurationError";
+  }
+}
+
+export function assertTomTomApiKeyConfigured() {
   const apiKey = process.env.TOMTOM_SEARCH_API_KEY;
-  if (!apiKey) {
-    throw new Error("Missing TOMTOM_SEARCH_API_KEY");
+  if (!apiKey?.trim()) {
+    throw new TomTomConfigurationError(
+      "Server configuration error: missing TOMTOM_SEARCH_API_KEY.",
+    );
   }
   return apiKey;
 }
@@ -103,6 +122,88 @@ function normalizeSearchResult(result: any): TomTomSearchResult {
   };
 }
 
+function normalizeForMatch(value: string) {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getMeaningfulTokens(value: string) {
+  return normalizeForMatch(value)
+    .split(" ")
+    .filter((token) => token.length >= 3);
+}
+
+function hasStrongNameMatch(expectedName: string, actualName: string) {
+  const normalizedExpected = normalizeForMatch(expectedName);
+  const normalizedActual = normalizeForMatch(actualName);
+
+  if (!normalizedExpected || !normalizedActual) {
+    return false;
+  }
+
+  if (
+    normalizedExpected === normalizedActual ||
+    normalizedExpected.includes(normalizedActual) ||
+    normalizedActual.includes(normalizedExpected)
+  ) {
+    return true;
+  }
+
+  const expectedTokens = getMeaningfulTokens(expectedName);
+  if (expectedTokens.length === 0) {
+    return false;
+  }
+
+  const matchedTokens = expectedTokens.filter((token) =>
+    normalizedActual.includes(token),
+  );
+
+  return matchedTokens.length >= Math.max(1, Math.ceil(expectedTokens.length * 0.6));
+}
+
+function hasLocationHintMatch(locationHint: string, result: TomTomSearchResult) {
+  if (!locationHint.trim()) {
+    return true;
+  }
+
+  const locationContext = normalizeForMatch(
+    [result.address, result.city, result.region, result.country]
+      .filter(Boolean)
+      .join(" "),
+  );
+  const locationTokens = getMeaningfulTokens(locationHint);
+
+  if (!locationContext || locationTokens.length === 0) {
+    return false;
+  }
+
+  const matchedTokens = locationTokens.filter((token) =>
+    locationContext.includes(token),
+  );
+
+  return matchedTokens.length >= Math.max(1, Math.ceil(locationTokens.length * 0.5));
+}
+
+export function isTomTomResultMatch({
+  placeName,
+  locationHint = "",
+  result,
+}: TomTomMatchOptions) {
+  if (!result) {
+    return false;
+  }
+
+  return (
+    hasStrongNameMatch(placeName, result.name) &&
+    hasLocationHintMatch(locationHint, result)
+  );
+}
+
 export async function searchTomTom({
   query,
   limit = 1,
@@ -131,7 +232,7 @@ export async function searchTomTom({
   }
 
   const params = new URLSearchParams({
-    key: getTomTomApiKey(),
+    key: assertTomTomApiKeyConfigured(),
     limit: String(limit),
   });
 
@@ -160,8 +261,8 @@ export async function searchTomTom({
     });
 
     if (response.ok) {
-      const payload = await response.json();
-      const rawResults = Array.isArray(payload?.results) ? payload.results : [];
+      const payload = (await response.json()) as TomTomSearchResponse;
+      const rawResults = Array.isArray(payload.results) ? payload.results : [];
       results = rawResults.map(normalizeSearchResult);
       tomTomCache.set(cacheKey, {
         expiresAt: Date.now() + TOMTOM_CACHE_TTL_MS,

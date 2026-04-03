@@ -114,15 +114,43 @@ export default function TravelForm({
     field: "dietaryRestrictions" | "cuisineInterests" | "diningStyle",
     value: string,
   ) => {
+    const exclusiveOptionByField = {
+      dietaryRestrictions: "No Restrictions",
+      cuisineInterests: "No Preference",
+      diningStyle: "",
+    } as const;
+
     setFormData((prev) => {
       const current = prev.foodPreferences[field] || [];
+      const exclusiveOption = exclusiveOptionByField[field];
+
+      if (current.includes(value)) {
+        return {
+          ...prev,
+          foodPreferences: {
+            ...prev.foodPreferences,
+            [field]: current.filter((item) => item !== value),
+          },
+        };
+      }
+
+      if (exclusiveOption && value === exclusiveOption) {
+        return {
+          ...prev,
+          foodPreferences: {
+            ...prev.foodPreferences,
+            [field]: [value],
+          },
+        };
+      }
+
       return {
         ...prev,
         foodPreferences: {
           ...prev.foodPreferences,
-          [field]: current.includes(value)
-            ? current.filter((item) => item !== value)
-            : [...current, value],
+          [field]: current
+            .filter((item) => item !== exclusiveOption)
+            .concat(value),
         },
       };
     });
