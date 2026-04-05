@@ -4,7 +4,7 @@ export interface FoodPreferences {
   dietaryRestrictions: string[];
   cuisineInterests: string[];
   diningStyle: string[];
-  foodPriority: "Not Important" | "Nice to Have" | "Major Trip Focus";
+  foodPriority: "Not Important" | "Nice to Have" | "Major Trip Focus" | "";
 }
 
 export interface PreferredLocation {

@@ -1,4 +1,3 @@
-import React from 'react';
 import { Recommendation } from '../services/geminiService';
 import { CheckCircle2, ArrowRight, Wallet, Calendar } from 'lucide-react';
 

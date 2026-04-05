@@ -1,19 +1,17 @@
+import crypto from "crypto";
 import {
   assertProviderApiKeysConfigured,
   generateText,
-  LlmConfigurationError,
+  generateTextWithMeta,
+  type LlmProvider,
 } from "./utils/llmRouter.js";
-import {
-  RequestValidationError,
-  validateItineraryRequest,
-} from "./utils/requestValidation.js";
+import { validateItineraryRequest } from "./utils/requestValidation.js";
+import { readJsonBody } from "./utils/http.js";
+import { getAnthropicVerificationTools } from "./tools/anthropicTools.js";
 import { getGeminiVerificationTools } from "./tools/geminiTools.js";
 import { getOpenAIVerificationTools } from "./tools/openaiTools.js";
-import { getAnthropicVerificationTools } from "./tools/anthropicTools.js";
-import {
-  assertTomTomApiKeyConfigured,
-  TomTomConfigurationError,
-} from "./utils/tomtomSearch.js";
+import { assertTomTomApiKeyConfigured } from "./utils/tomtomSearch.js";
+import { assertRedisConfigured, getRedisClient } from "./utils/redis.js";
 import { formatFoodPreferences } from "./utils/foodPreferences.js";
 import { formatLodgingPreferences } from "./utils/lodgingPreferences.js";
 import {
@@ -27,18 +25,6 @@ function sendJson(res: any, status: number, data: any) {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Cache-Control", "no-store");
   res.end(JSON.stringify(data));
-}
-
-async function readJsonBody(req: any) {
-  if (req.body) {
-    if (typeof req.body === "string") {
-      return JSON.parse(req.body || "{}");
-    }
-    return req.body;
-  }
-  let body = "";
-  for await (const chunk of req) body += chunk;
-  return JSON.parse(body || "{}");
 }
 
 const monthLabels: Record<string, string> = {
@@ -62,6 +48,40 @@ function sanitize(str: any) {
   );
 }
 
+function getItineraryVerificationConfig(): {
+  provider: LlmProvider;
+  model: string;
+  geminiTools?: ReturnType<typeof getGeminiVerificationTools>;
+  openaiTools?: ReturnType<typeof getOpenAIVerificationTools>;
+  anthropicTools?: ReturnType<typeof getAnthropicVerificationTools>;
+} {
+  const rawProvider = (
+    process.env.ITINERARY_VERIFICATION_PROVIDER || "gemini"
+  ).toLowerCase();
+
+  if (rawProvider === "gemini") {
+    return {
+      provider: "gemini",
+      model: process.env.ITINERARY_VERIFICATION_MODEL || "gemini-2.5-flash",
+      geminiTools: getGeminiVerificationTools(),
+    };
+  }
+
+  if (rawProvider === "anthropic") {
+    return {
+      provider: "anthropic",
+      model: process.env.ITINERARY_VERIFICATION_MODEL || "claude-haiku-4-5",
+      anthropicTools: getAnthropicVerificationTools(),
+    };
+  }
+
+  return {
+    provider: "openai",
+    model: process.env.ITINERARY_VERIFICATION_MODEL || "gpt-5-nano",
+    openaiTools: getOpenAIVerificationTools(),
+  };
+}
+
 export default async function handler(req: any, res: any) {
   if (req.method === "OPTIONS") {
     res.statusCode = 204;
@@ -72,8 +92,9 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    assertProviderApiKeysConfigured(["gemini", "anthropic"]);
+    assertProviderApiKeysConfigured(["gemini", "anthropic", "openai"]);
     assertTomTomApiKeyConfigured();
+    assertRedisConfigured();
 
     const body = validateItineraryRequest(await readJsonBody(req));
     const data = body.data;
@@ -99,11 +120,21 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    const durationValue = Number(data.durationValue);
-    if (isNaN(durationValue) || durationValue <= 0) {
-      return sendJson(res, 400, {
-        error: "Invalid duration value. Must be a number.",
-      });
+    const durationValue = data.durationValue;
+
+    const cachePayload = { version: 2, data, recommendation };
+    const cacheKey =
+      "itinerary:" +
+      crypto
+        .createHash("sha256")
+        .update(JSON.stringify(cachePayload))
+        .digest("hex");
+    const redis = await getRedisClient();
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached) return sendJson(res, 200, { itinerary: cached });
+    } catch (err) {
+      console.warn("[itinerary] Redis read error", err);
     }
 
     const draftSystemInstruction =
@@ -114,9 +145,9 @@ export default async function handler(req: any, res: any) {
 
     const draftPrompt = `
     You are the 'Trip Planner Draft Agent'.
-    Destination: ${recommendation.title}
+    Destination: ${sanitize(recommendation.title)}
     Preferred Location: ${preferredLocation}
-    Trip Context: ${recommendation.description}
+    Trip Context: ${sanitize(recommendation.description)}
     Time of Year: ${timeOfYear}
     Duration: ${durationValue} ${sanitize(data.durationUnit)}
     Travel Style: ${travelerType}
@@ -353,49 +384,53 @@ export default async function handler(req: any, res: any) {
     - Book timed-entry attractions early during peak periods.
   `;
 
-    // Verification model options:
-    // Gemini:
-    // const itinerary = await generateText({
-    //   provider: "gemini",
-    //   model: "gemini-2.5-flash",
-    //   prompt: verifyPrompt,
-    //   systemInstruction: ItinerarySystemInstruction,
-    //   useSearchTool: false,
-    //   geminiTools: getGeminiVerificationTools(),
-    // });
-    //
-    // OpenAI:
-    // const itinerary = await generateText({
-    //   provider: "openai",
-    //   model: "gpt-5.1",
-    //   prompt: verifyPrompt,
-    //   systemInstruction: ItinerarySystemInstruction,
-    //   useSearchTool: false,
-    //   openaiTools: getOpenAIVerificationTools(),
-    // });
-    //
-    // Anthropic:
-    const itinerary = await generateText({
-      provider: "anthropic",
-      model: "claude-haiku-4-5",
+    const verificationConfig = getItineraryVerificationConfig();
+    const verificationResult = await generateTextWithMeta({
+      provider: verificationConfig.provider,
+      model: verificationConfig.model,
       prompt: verifyPrompt,
       systemInstruction: ItinerarySystemInstruction,
       useSearchTool: false,
-      anthropicTools: getAnthropicVerificationTools(),
+      geminiTools: verificationConfig.geminiTools,
+      openaiTools: verificationConfig.openaiTools,
+      anthropicTools: verificationConfig.anthropicTools,
     });
 
+    const verifiedItinerary = verificationResult.text.trim();
+    const finalItinerary = verifiedItinerary || draftPlan;
+
+    if (verifiedItinerary && !verificationResult.usedFallback) {
+      redis
+        .set(cacheKey, verifiedItinerary, {
+          EX: 86400 * 7, // Cache successfully verified trips for 7 days
+        })
+        .catch((err) => console.warn("[itinerary] Redis write error", err));
+    }
+
     return sendJson(res, 200, {
-      itinerary: itinerary || draftPlan,
+      itinerary: finalItinerary,
     });
   } catch (err: any) {
     console.error(err);
     if (err?.name === "RequestValidationError") {
       return sendJson(res, 400, { error: err.message });
     }
+    if (err?.name === "InvalidJsonBodyError") {
+      return sendJson(res, 400, { error: err.message });
+    }
+    if (err?.name === "RequestBodyTooLargeError") {
+      return sendJson(res, 413, { error: err.message });
+    }
     if (err?.name === "LlmConfigurationError") {
       return sendJson(res, 500, { error: err.message });
     }
     if (err?.name === "TomTomConfigurationError") {
+      return sendJson(res, 500, { error: err.message });
+    }
+    if (
+      err?.name === "RedisConfigurationError" ||
+      err?.name === "RedisConnectionError"
+    ) {
       return sendJson(res, 500, { error: err.message });
     }
     if (err?.status === 429 || err?.message?.includes("rate limit")) {

@@ -1,35 +1,36 @@
-import type { Responses } from "openai/resources/responses/responses";
+import OpenAI from "openai";
 import { isTomTomResultMatch, searchTomTom } from "../utils/tomtomSearch.js";
 
 export interface OpenAIToolExecutionContext {
   name: string;
-  args: Record<string, unknown>;
+  args: any;
 }
 
-export function getOpenAIVerificationTools(): Responses.FunctionTool[] {
+export function getOpenAIVerificationTools(): OpenAI.Chat.ChatCompletionTool[] {
   return [
     {
       type: "function",
-      name: "search_place",
-      description:
-        "Verify a hotel, restaurant, attraction, or business by searching for its official place details before including it in the final answer.",
-      parameters: {
-        type: "object",
-        properties: {
-          name: {
-            type: "string",
-            description: "The exact or best-known name of the place to verify.",
+      function: {
+        name: "search_place",
+        description:
+          "Verify a hotel, restaurant, attraction, or business by searching for its official place details before including it in the final answer.",
+        parameters: {
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+              description:
+                "The exact or best-known name of the place to verify.",
+            },
+            locationHint: {
+              type: "string",
+              description:
+                "City, region, or destination hint to narrow the search. Use an empty string if unknown.",
+            },
           },
-          locationHint: {
-            type: "string",
-            description:
-              "City, region, or destination hint to narrow the search. Use an empty string if unknown.",
-          },
-        },
-        required: ["name", "locationHint"],
-        additionalProperties: false,
+          required: ["name", "locationHint"],
+        } as any,
       },
-      strict: true,
     },
   ];
 }
@@ -37,7 +38,7 @@ export function getOpenAIVerificationTools(): Responses.FunctionTool[] {
 export async function executeOpenAITool({
   name,
   args,
-}: OpenAIToolExecutionContext): Promise<Record<string, unknown>> {
+}: OpenAIToolExecutionContext): Promise<any> {
   if (name === "search_place") {
     const placeName = typeof args.name === "string" ? args.name.trim() : "";
     const locationHint =
@@ -74,7 +75,8 @@ export async function executeOpenAITool({
       return {
         ok: false,
         query,
-        error: "Top search result did not match the requested place closely enough.",
+        error:
+          "Top search result did not match the requested place closely enough.",
         result: null,
       };
     }

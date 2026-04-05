@@ -1,4 +1,4 @@
-import { createClient } from "redis";
+import { getRedisClient, runFixedWindowRateLimit } from "./redis.js";
 
 export interface TomTomSearchOptions {
   query: string;
@@ -36,6 +36,7 @@ const TOMTOM_MIN_INTERVAL_MS = 400;
 const TOMTOM_MAX_RETRIES = 3;
 const TOMTOM_RETRY_BASE_DELAY_MS = 1200;
 const TOMTOM_CACHE_TTL_MS = 5 * 60 * 1000;
+const TOMTOM_REDIS_CACHE_TTL_SEC = 30 * 24 * 60 * 60; // 30 days
 
 let lastTomTomRequestAt = 0;
 let tomTomQueue: Promise<void> = Promise.resolve();
@@ -44,35 +45,6 @@ const tomTomCache = new Map<
   string,
   { expiresAt: number; results: TomTomSearchResult[] }
 >();
-
-const redisUrl = process.env.REDIS_URL;
-const redisClient = redisUrl ? createClient({ url: redisUrl }) : null;
-let isRedisConnected = false;
-
-async function getRedisClient() {
-  if (!redisClient) return null;
-  if (!isRedisConnected) {
-    redisClient.on("error", (err: any) => console.error("Redis error:", err));
-    await redisClient.connect();
-    isRedisConnected = true;
-  }
-  return redisClient;
-}
-
-async function checkRateLimit(key: string, limit: number, windowSec: number) {
-  const client = await getRedisClient();
-  if (!client) return true;
-
-  const currentWindow = Math.floor(Date.now() / (windowSec * 1000));
-  const redisKey = `ratelimit:${key}:${currentWindow}`;
-
-  const requests = await client.incr(redisKey);
-  if (requests === 1) {
-    await client.expire(redisKey, windowSec * 2);
-  }
-
-  return requests <= limit;
-}
 
 export class TomTomConfigurationError extends Error {
   constructor(message: string) {
@@ -105,23 +77,27 @@ function buildCacheKey({
   latitude,
   longitude,
 }: TomTomSearchOptions) {
+  const normalizedQuery = query
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
   return JSON.stringify({
-    query: query.trim().toLowerCase(),
+    query: normalizedQuery,
     limit: limit ?? 1,
-    latitude: latitude ?? null,
-    longitude: longitude ?? null,
+    lat: typeof latitude === "number" ? Number(latitude.toFixed(2)) : null,
+    lon: typeof longitude === "number" ? Number(longitude.toFixed(2)) : null,
   });
 }
 
 async function waitForTomTomSlot() {
-  if (redisUrl) {
-    const success = await checkRateLimit("tomtom-global-limit", 5, 1);
-    if (!success) {
-      const error: any = new Error("TomTom global rate limit exceeded");
-      error.status = 429;
-      throw error;
-    }
-    return;
+  const success = await runFixedWindowRateLimit("tomtom-global-limit", 5, 1);
+  if (!success) {
+    const error: any = new Error("TomTom global rate limit exceeded");
+    error.status = 429;
+    throw error;
   }
 
   const previous = tomTomQueue;
@@ -161,64 +137,19 @@ function normalizeSearchResult(result: any): TomTomSearchResult {
   };
 }
 
-function normalizeForMatch(value: string) {
-  return value
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "")
-    .trim();
-}
-
-function hasStrongNameMatch(expectedName: string, actualName: string) {
-  const normalizedExpected = normalizeForMatch(expectedName);
-  const normalizedActual = normalizeForMatch(actualName);
-
-  if (!normalizedExpected || !normalizedActual) {
-    return false;
-  }
-
-  return (
-    normalizedExpected.includes(normalizedActual) ||
-    normalizedActual.includes(normalizedExpected)
-  );
-}
-
-function hasLocationHintMatch(
-  locationHint: string,
-  result: TomTomSearchResult,
-) {
-  if (!locationHint.trim()) {
-    return true;
-  }
-
-  const locationContext = normalizeForMatch(
-    [result.address, result.city, result.region, result.country]
-      .filter(Boolean)
-      .join(" "),
-  );
-  const hint = normalizeForMatch(locationHint);
-
-  if (!locationContext || !hint) {
-    return false;
-  }
-
-  return locationContext.includes(hint) || hint.includes(locationContext);
-}
-
 export function isTomTomResultMatch({
   placeName,
   locationHint = "",
   result,
 }: TomTomMatchOptions) {
-  if (!result) {
+  void placeName;
+  void locationHint;
+
+  if (!result || !result.name.trim()) {
     return false;
   }
 
-  return (
-    hasStrongNameMatch(placeName, result.name) &&
-    hasLocationHintMatch(locationHint, result)
-  );
+  return true;
 }
 
 export async function searchTomTom({
@@ -241,11 +172,36 @@ export async function searchTomTom({
   const cached = tomTomCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     if (isDebugEnabled()) {
-      console.warn("[tomtomSearch] cache-hit", {
+      console.warn("[tomtomSearch] local-cache-hit", {
         query: trimmedQuery,
       });
     }
     return cached.results;
+  }
+
+  const redis = await getRedisClient();
+  try {
+    const redisCached = await redis.get(`tomtom:cache:${cacheKey}`);
+    if (redisCached) {
+      const cachedJson =
+        typeof redisCached === "string"
+          ? redisCached
+          : redisCached.toString("utf8");
+      const parsedResults = JSON.parse(cachedJson) as TomTomSearchResult[];
+      if (isDebugEnabled()) {
+        console.warn("[tomtomSearch] global-redis-cache-hit", {
+          query: trimmedQuery,
+        });
+      }
+      if (tomTomCache.size > 1000) tomTomCache.clear();
+      tomTomCache.set(cacheKey, {
+        expiresAt: Date.now() + TOMTOM_CACHE_TTL_MS,
+        results: parsedResults,
+      });
+      return parsedResults;
+    }
+  } catch (err) {
+    console.warn("[tomtomSearch] redis-cache-read-error", err);
   }
 
   const params = new URLSearchParams({
@@ -281,10 +237,21 @@ export async function searchTomTom({
       const payload = (await response.json()) as TomTomSearchResponse;
       const rawResults = Array.isArray(payload.results) ? payload.results : [];
       results = rawResults.map(normalizeSearchResult);
+
+      // Prevent memory leaks in warm serverless containers
+      if (tomTomCache.size > 1000) {
+        tomTomCache.clear();
+      }
       tomTomCache.set(cacheKey, {
         expiresAt: Date.now() + TOMTOM_CACHE_TTL_MS,
         results,
       });
+
+      redis
+        .set(`tomtom:cache:${cacheKey}`, JSON.stringify(results), {
+          EX: TOMTOM_REDIS_CACHE_TTL_SEC,
+        })
+        .catch((err) => console.warn("Redis set error:", err));
       break;
     }
 

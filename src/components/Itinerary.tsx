@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import Markdown from 'react-markdown';
 import { Recommendation } from '../services/geminiService';
 import { ArrowLeft, Download, RefreshCcw } from 'lucide-react';

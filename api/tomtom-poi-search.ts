@@ -1,12 +1,7 @@
-import {
-  assertTomTomApiKeyConfigured,
-  searchTomTom,
-  TomTomConfigurationError,
-} from "./utils/tomtomSearch.js";
-import {
-  RequestValidationError,
-  validateTomTomPoiSearchRequest,
-} from "./utils/requestValidation.js";
+import { assertTomTomApiKeyConfigured, searchTomTom } from "./utils/tomtomSearch.js";
+import { readJsonBody } from "./utils/http.js";
+import { validateTomTomPoiSearchRequest } from "./utils/requestValidation.js";
+import { assertRedisConfigured } from "./utils/redis.js";
 
 function sendJson(res: any, status: number, data: any) {
   res.statusCode = status;
@@ -14,19 +9,6 @@ function sendJson(res: any, status: number, data: any) {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Cache-Control", "no-store");
   res.end(JSON.stringify(data));
-}
-
-async function readJsonBody(req: any) {
-  if (req.body) {
-    if (typeof req.body === "string") {
-      return JSON.parse(req.body || "{}");
-    }
-    return req.body;
-  }
-
-  let body = "";
-  for await (const chunk of req) body += chunk;
-  return JSON.parse(body || "{}");
 }
 
 export default async function handler(req: any, res: any) {
@@ -41,6 +23,7 @@ export default async function handler(req: any, res: any) {
 
   try {
     assertTomTomApiKeyConfigured();
+    assertRedisConfigured();
     const { query, limit, latitude, longitude } =
       validateTomTomPoiSearchRequest(await readJsonBody(req));
 
@@ -54,14 +37,24 @@ export default async function handler(req: any, res: any) {
     return sendJson(res, 200, { results });
   } catch (err: any) {
     console.error(err);
-    if (err instanceof RequestValidationError) {
+    if (err?.name === "RequestValidationError") {
       return sendJson(res, 400, { error: err.message });
     }
-    if (err instanceof TomTomConfigurationError) {
+    if (err?.name === "InvalidJsonBodyError") {
+      return sendJson(res, 400, { error: err.message });
+    }
+    if (err?.name === "RequestBodyTooLargeError") {
+      return sendJson(res, 413, { error: err.message });
+    }
+    if (err?.name === "TomTomConfigurationError") {
       return sendJson(res, 500, { error: err.message });
     }
-    return sendJson(res, 500, {
-      error: err?.message || "TomTom search failed.",
-    });
+    if (
+      err?.name === "RedisConfigurationError" ||
+      err?.name === "RedisConnectionError"
+    ) {
+      return sendJson(res, 500, { error: err.message });
+    }
+    return sendJson(res, 500, { error: "Server error" });
   }
 }

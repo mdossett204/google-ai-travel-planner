@@ -24,7 +24,7 @@ const defaultFormData: TravelFormData = {
     dietaryRestrictions: [],
     cuisineInterests: [],
     diningStyle: [],
-    foodPriority: "Nice to Have",
+    foodPriority: "",
   },
   lodgingPreferences: {
     lodgingTypes: [],
@@ -75,6 +75,7 @@ export default function TravelForm({
   const [formData, setFormData] = useState<TravelFormData>(
     buildInitialFormData(initialData),
   );
+  const [showFoodPriorityError, setShowFoodPriorityError] = useState(false);
 
   const handleChange = (
     e: React.ChangeEvent<HTMLSelectElement | HTMLInputElement>,
@@ -157,15 +158,19 @@ export default function TravelForm({
   };
 
   const handleFoodPriorityChange = (
-    value: "Not Important" | "Nice to Have" | "Major Trip Focus",
+    value: "Not Important" | "Nice to Have" | "Major Trip Focus" | "",
   ) => {
     setFormData((prev) => ({
       ...prev,
       foodPreferences: {
         ...prev.foodPreferences,
-        foodPriority: value,
+        foodPriority:
+          prev.foodPreferences.foodPriority === value && value !== ""
+            ? ""
+            : value,
       },
     }));
+    setShowFoodPriorityError(false);
   };
 
   const handleLodgingTypeToggle = (value: string) => {
@@ -253,6 +258,12 @@ export default function TravelForm({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!formData.foodPreferences.foodPriority) {
+      setShowFoodPriorityError(true);
+      return;
+    }
+
     onSubmit(formData);
   };
 
@@ -678,13 +689,21 @@ export default function TravelForm({
                     className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${
                       formData.foodPreferences.foodPriority === option
                         ? "bg-emerald-100 border-emerald-500 text-emerald-800"
-                        : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
+                        : showFoodPriorityError
+                          ? "bg-white border-red-300 text-slate-700 hover:border-red-400"
+                          : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
                     }`}
+                    aria-pressed={formData.foodPreferences.foodPriority === option}
                   >
                     {option}
                   </button>
                 ))}
               </div>
+              {showFoodPriorityError ? (
+                <p className="text-xs text-red-600">
+                  Choose how important food is for this trip.
+                </p>
+              ) : null}
             </div>
           </div>
 
@@ -696,8 +715,8 @@ export default function TravelForm({
               </span>
             </label>
             <p className="text-xs text-slate-500">
-              Tell us what kinds of places you prefer staying in once you are
-              at the destination.
+              Tell us what kinds of places you prefer staying in once you are at
+              the destination.
             </p>
             <div className="flex flex-wrap gap-2">
               {lodgingTypeOptions.map((option) => (
@@ -721,7 +740,10 @@ export default function TravelForm({
         <div className="pt-6 flex gap-4">
           <button
             type="button"
-            onClick={() => setFormData(defaultFormData)}
+            onClick={() => {
+              setFormData(defaultFormData);
+              setShowFoodPriorityError(false);
+            }}
             disabled={isLoading}
             className="px-6 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-xl transition-colors disabled:opacity-70"
           >

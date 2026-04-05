@@ -10,7 +10,7 @@ export interface GeminiToolDefinition {
 
 export interface GeminiToolExecutionContext {
   name: string;
-  args: Record<string, unknown>;
+  args: any;
 }
 
 export function getGeminiVerificationTools(): GeminiToolDefinition[] {
@@ -26,7 +26,8 @@ export function getGeminiVerificationTools(): GeminiToolDefinition[] {
             properties: {
               name: {
                 type: "STRING",
-                description: "The exact or best-known name of the place to verify.",
+                description:
+                  "The exact or best-known name of the place to verify.",
               },
               locationHint: {
                 type: "STRING",
@@ -45,10 +46,9 @@ export function getGeminiVerificationTools(): GeminiToolDefinition[] {
 export async function executeGeminiTool({
   name,
   args,
-}: GeminiToolExecutionContext): Promise<Record<string, unknown>> {
+}: GeminiToolExecutionContext): Promise<any> {
   if (name === "search_place") {
-    const placeName =
-      typeof args.name === "string" ? args.name.trim() : "";
+    const placeName = typeof args.name === "string" ? args.name.trim() : "";
     const locationHint =
       typeof args.locationHint === "string" ? args.locationHint.trim() : "";
 
@@ -83,7 +83,8 @@ export async function executeGeminiTool({
       return {
         ok: false,
         query,
-        error: "Top search result did not match the requested place closely enough.",
+        error:
+          "Top search result did not match the requested place closely enough.",
         result: null,
       };
     }

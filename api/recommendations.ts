@@ -1,12 +1,11 @@
+import crypto from "crypto";
+import { assertProviderApiKeysConfigured, generateText } from "./utils/llmRouter.js";
 import {
-  assertProviderApiKeysConfigured,
-  generateText,
-  LlmConfigurationError,
-} from "./utils/llmRouter.js";
-import {
-  RequestValidationError,
+  validateRecommendationsResponse,
   validateTravelFormData,
 } from "./utils/requestValidation.js";
+import { readJsonBody } from "./utils/http.js";
+import { assertRedisConfigured, getRedisClient } from "./utils/redis.js";
 import { formatFoodPreferences } from "./utils/foodPreferences.js";
 import { formatLodgingPreferences } from "./utils/lodgingPreferences.js";
 import {
@@ -20,18 +19,6 @@ function sendJson(res: any, status: number, data: any) {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Cache-Control", "no-store");
   res.end(JSON.stringify(data));
-}
-
-async function readJsonBody(req: any) {
-  if (req.body) {
-    if (typeof req.body === "string") {
-      return JSON.parse(req.body || "{}");
-    }
-    return req.body;
-  }
-  let body = "";
-  for await (const chunk of req) body += chunk;
-  return JSON.parse(body || "{}");
 }
 
 const monthLabels: Record<string, string> = {
@@ -65,6 +52,7 @@ export default async function handler(req: any, res: any) {
 
   try {
     assertProviderApiKeysConfigured(["gemini"]);
+    assertRedisConfigured();
 
     const data = validateTravelFormData(await readJsonBody(req));
     const foodPreferences = formatFoodPreferences(data.foodPreferences || {});
@@ -82,11 +70,28 @@ export default async function handler(req: any, res: any) {
             .join(", ")
         : "Not specified. Recommend the best realistic time to visit.";
 
-    const durationValue = Number(data.durationValue);
-    if (isNaN(durationValue) || durationValue <= 0) {
-      return sendJson(res, 400, {
-        error: "Invalid duration value. Must be a number.",
-      });
+    const durationValue = data.durationValue;
+
+    const cacheKey =
+      "recs:" +
+      crypto
+        .createHash("sha256")
+        .update(JSON.stringify({ version: 2, data }))
+        .digest("hex");
+    const redis = await getRedisClient();
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        const cachedJson =
+          typeof cached === "string" ? cached : cached.toString("utf8");
+        return sendJson(
+          res,
+          200,
+          validateRecommendationsResponse(JSON.parse(cachedJson)),
+        );
+      }
+    } catch (err) {
+      console.warn("[recommendations] Redis read error", err);
     }
 
     const prompt = `
@@ -227,7 +232,7 @@ export default async function handler(req: any, res: any) {
       }
 
       try {
-        parsed = JSON.parse(parsedText);
+        parsed = validateRecommendationsResponse(JSON.parse(parsedText));
         break;
       } catch (err) {
         console.warn(
@@ -242,13 +247,33 @@ export default async function handler(req: any, res: any) {
       });
     }
 
+    redis
+      .set(cacheKey, JSON.stringify(parsed), {
+        EX: 86400, // Cache for 24 hours
+      })
+      .catch((err) =>
+        console.warn("[recommendations] Redis write error", err),
+      );
+
     return sendJson(res, 200, parsed);
   } catch (err: any) {
     console.error(err);
     if (err?.name === "RequestValidationError") {
       return sendJson(res, 400, { error: err.message });
     }
+    if (err?.name === "InvalidJsonBodyError") {
+      return sendJson(res, 400, { error: err.message });
+    }
+    if (err?.name === "RequestBodyTooLargeError") {
+      return sendJson(res, 413, { error: err.message });
+    }
     if (err?.name === "LlmConfigurationError") {
+      return sendJson(res, 500, { error: err.message });
+    }
+    if (
+      err?.name === "RedisConfigurationError" ||
+      err?.name === "RedisConnectionError"
+    ) {
       return sendJson(res, 500, { error: err.message });
     }
     if (err?.status === 429 || err?.message?.includes("rate limit")) {

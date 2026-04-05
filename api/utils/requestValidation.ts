@@ -7,9 +7,9 @@ export class RequestValidationError extends Error {
 
 export interface ValidatedTravelFormData {
   timeOfYear: string[];
-  durationValue: number | "";
+  durationValue: number;
   durationUnit: "days" | "weeks";
-  travelers: "Solo" | "Couple" | "Family" | "Friends" | "";
+  travelers: "Solo" | "Couple" | "Family" | "Friends";
   budget: {
     lodging: string;
     localTransportation: string;
@@ -112,15 +112,9 @@ function parseStringEnum<T extends string>(
   return value as T;
 }
 
-function parseNumberOrEmptyString(value: unknown, fieldName: string) {
-  if (value === "") {
-    return "";
-  }
-
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-    throw new RequestValidationError(
-      `${fieldName} must be a non-negative number or an empty string.`,
-    );
+function parsePositiveNumber(value: unknown, fieldName: string) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    throw new RequestValidationError(`${fieldName} must be a positive number.`);
   }
 
   return value;
@@ -156,13 +150,12 @@ export function validateTravelFormData(raw: unknown): ValidatedTravelFormData {
 
   return {
     timeOfYear: parseStringArray(input.timeOfYear, "timeOfYear"),
-    durationValue: parseNumberOrEmptyString(input.durationValue, "durationValue"),
+    durationValue: parsePositiveNumber(input.durationValue, "durationValue"),
     durationUnit: parseStringEnum(input.durationUnit, "durationUnit", [
       "days",
       "weeks",
     ]),
     travelers: parseStringEnum(input.travelers, "travelers", [
-      "",
       "Solo",
       "Couple",
       "Family",
@@ -208,14 +201,17 @@ export function validateTravelFormData(raw: unknown): ValidatedTravelFormData {
       "localTransportation",
     ),
     preferredLocation: {
-      country: parseString(preferredLocation.country, "preferredLocation.country"),
+      country: parseString(preferredLocation.country, "preferredLocation.country", {
+        allowEmpty: false,
+      }),
       stateOrProvince: parseString(
         preferredLocation.stateOrProvince,
         "preferredLocation.stateOrProvince",
+        { allowEmpty: false },
       ),
-      city: parseString(preferredLocation.city, "preferredLocation.city"),
+      city: parseOptionalString(preferredLocation.city, "preferredLocation.city"),
     },
-    attractionInterests: parseString(
+    attractionInterests: parseOptionalString(
       input.attractionInterests,
       "attractionInterests",
     ),
@@ -254,6 +250,35 @@ export function validateItineraryRequest(
     data: validateTravelFormData(input.data),
     recommendation: validateRecommendation(input.recommendation),
   };
+}
+
+export function validateRecommendationsResponse(raw: unknown) {
+  if (!Array.isArray(raw)) {
+    throw new RequestValidationError(
+      "AI response must be an array of recommendations.",
+    );
+  }
+
+  if (raw.length !== 3) {
+    throw new RequestValidationError(
+      "AI response must contain exactly 3 recommendations.",
+    );
+  }
+
+  return raw.map((item, index) => {
+    const recommendation = validateRecommendation(item);
+
+    if (
+      recommendation.highlights.length < 3 ||
+      recommendation.highlights.length > 4
+    ) {
+      throw new RequestValidationError(
+        `recommendation[${index}].highlights must contain 3 to 4 items.`,
+      );
+    }
+
+    return recommendation;
+  });
 }
 
 export function validateTomTomPoiSearchRequest(
