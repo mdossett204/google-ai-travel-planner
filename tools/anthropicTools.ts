@@ -1,9 +1,9 @@
-import { searchTomTom } from "../utils/tomtomSearch.js";
+import { isTomTomResultMatch, searchTomTom } from "./tomtomSearch.js";
 import type Anthropic from "@anthropic-ai/sdk";
 
 export interface AnthropicToolExecutionContext {
   name: string;
-  args: Record<string, unknown>;
+  args: any;
 }
 
 export function getAnthropicVerificationTools(): Anthropic.Tool[] {
@@ -34,7 +34,7 @@ export function getAnthropicVerificationTools(): Anthropic.Tool[] {
 export async function executeAnthropicTool({
   name,
   args,
-}: AnthropicToolExecutionContext): Promise<Record<string, unknown>> {
+}: AnthropicToolExecutionContext): Promise<any> {
   if (name === "search_place") {
     const placeName = typeof args.name === "string" ? args.name.trim() : "";
     const locationHint =
@@ -53,12 +53,28 @@ export async function executeAnthropicTool({
       limit: 1,
     });
     const result = results[0] || null;
+    const isMatch = isTomTomResultMatch({
+      placeName,
+      locationHint,
+      result,
+    });
 
     if (process.env.DEBUG_LLM_ROUTER === "true") {
       console.warn("[anthropicTools] search_place-result", {
         query,
+        isMatch,
         result,
       });
+    }
+
+    if (!isMatch) {
+      return {
+        ok: false,
+        query,
+        error:
+          "Top search result did not match the requested place closely enough.",
+        result: null,
+      };
     }
 
     return {

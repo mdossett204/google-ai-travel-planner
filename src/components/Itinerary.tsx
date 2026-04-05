@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import { useState } from 'react';
 import Markdown from 'react-markdown';
 import { Recommendation } from '../services/geminiService';
 import { ArrowLeft, Download, RefreshCcw } from 'lucide-react';
@@ -11,7 +11,6 @@ interface ItineraryProps {
 }
 
 export default function Itinerary({ recommendation, itinerary, onBack, onRestart }: ItineraryProps) {
-  const contentRef = useRef<HTMLDivElement>(null);
   const [isDownloading, setIsDownloading] = useState(false);
 
   const handleDownload = () => {
@@ -19,11 +18,13 @@ export default function Itinerary({ recommendation, itinerary, onBack, onRestart
     try {
       const element = document.createElement("a");
       const file = new Blob([itinerary], { type: 'text/markdown' });
-      element.href = URL.createObjectURL(file);
+      const objectUrl = URL.createObjectURL(file);
+      element.href = objectUrl;
       element.download = `${recommendation.title.replace(/\s+/g, '_')}_Itinerary.md`;
       document.body.appendChild(element);
       element.click();
       document.body.removeChild(element);
+      URL.revokeObjectURL(objectUrl);
     } finally {
       setIsDownloading(false);
     }
@@ -68,7 +69,7 @@ export default function Itinerary({ recommendation, itinerary, onBack, onRestart
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8 md:p-12">
-        <div ref={contentRef} className="prose prose-slate prose-emerald max-w-none">
+        <div className="prose prose-slate prose-emerald max-w-none">
           <Markdown>{itinerary}</Markdown>
         </div>
       </div>

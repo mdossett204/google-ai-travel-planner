@@ -1,5 +1,4 @@
 import OpenAI from "openai";
-import type { Responses } from "openai/resources/responses/responses";
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenAI } from "@google/genai";
 import {
@@ -8,19 +7,26 @@ import {
 } from "../tools/geminiTools.js";
 import { executeOpenAITool } from "../tools/openaiTools.js";
 import { executeAnthropicTool } from "../tools/anthropicTools.js";
+import { runFixedWindowRateLimit } from "./redis.js";
 
 export type LlmProvider = "openai" | "anthropic" | "gemini";
 
+export class LlmConfigurationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LlmConfigurationError";
+  }
+}
+
 const PROVIDERS: LlmProvider[] = ["openai", "anthropic", "gemini"];
-const MAX_GEMINI_TOOL_ITERATIONS = 10;
-const MAX_GEMINI_TOOL_CALLS = 20;
-const MAX_OPENAI_TOOL_ITERATIONS = 10;
-const MAX_OPENAI_TOOL_CALLS = 20;
-const MAX_ANTHROPIC_TOOL_ITERATIONS = 3;
-const MAX_ANTHROPIC_TOOL_CALLS = 5;
+const MAX_TOOL_CALLS = 10;
+const MAX_TOOL_ITERATIONS = 4;
 const LLM_MAX_RETRIES = 3;
 const LLM_RETRY_BASE_DELAY_MS = 1500;
 const GEMINI_MIN_INTERVAL_MS = 6000;
+const GLOBAL_LLM_RATE_LIMIT_KEY = "llm-call-global-limit";
+const GLOBAL_LLM_RATE_LIMIT = 15;
+const GLOBAL_LLM_RATE_LIMIT_WINDOW_SEC = 60;
 
 let lastGeminiRequestAt = 0;
 let geminiQueue: Promise<void> = Promise.resolve();
@@ -30,17 +36,22 @@ interface GeminiFunctionCall {
   args?: Record<string, unknown>;
 }
 
-interface OpenAIFunctionCallOutputInputItem {
-  type: "function_call_output";
-  call_id: string;
-  output: string;
-}
-
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function waitForGeminiSlot() {
+  const success = await runFixedWindowRateLimit(
+    GLOBAL_LLM_RATE_LIMIT_KEY,
+    GLOBAL_LLM_RATE_LIMIT,
+    GLOBAL_LLM_RATE_LIMIT_WINDOW_SEC,
+  );
+  if (!success) {
+    const error: any = new Error("Global rate limit exceeded");
+    error.status = 429;
+    throw error;
+  }
+
   const previous = geminiQueue;
   let release!: () => void;
 
@@ -58,6 +69,24 @@ async function waitForGeminiSlot() {
 
   lastGeminiRequestAt = Date.now();
   release();
+}
+
+async function waitForLlmRequestSlot(provider: LlmProvider) {
+  if (provider === "gemini") {
+    await waitForGeminiSlot();
+    return;
+  }
+
+  const success = await runFixedWindowRateLimit(
+    GLOBAL_LLM_RATE_LIMIT_KEY,
+    GLOBAL_LLM_RATE_LIMIT,
+    GLOBAL_LLM_RATE_LIMIT_WINDOW_SEC,
+  );
+  if (!success) {
+    const error: any = new Error("Global rate limit exceeded");
+    error.status = 429;
+    throw error;
+  }
 }
 
 function isRateLimitError(err: any) {
@@ -118,6 +147,33 @@ function getProvider(input?: string): LlmProvider {
   return "gemini";
 }
 
+function getProviderApiKeyEnvVar(provider: LlmProvider) {
+  switch (provider) {
+    case "openai":
+      return "OPENAI_API_KEY";
+    case "anthropic":
+      return "ANTHROPIC_API_KEY";
+    case "gemini":
+      return "GEMINI_API_KEY";
+  }
+}
+
+export function assertProviderApiKeyConfigured(provider: LlmProvider) {
+  const envVar = getProviderApiKeyEnvVar(provider);
+  if (!process.env[envVar]?.trim()) {
+    throw new LlmConfigurationError(
+      `Server configuration error: missing ${envVar} for provider "${provider}".`,
+    );
+  }
+}
+
+export function assertProviderApiKeysConfigured(providers: LlmProvider[]) {
+  const uniqueProviders = [...new Set(providers)];
+  for (const provider of uniqueProviders) {
+    assertProviderApiKeyConfigured(provider);
+  }
+}
+
 function normalizeText(input: any): string {
   if (typeof input === "string") return input.trim();
   const blocks = Array.isArray(input?.content) ? input.content : [];
@@ -139,16 +195,14 @@ function getToolLimitFallbackPrompt(provider: string, maxToolCalls: number) {
 async function finalizeOpenAIWithoutTools({
   openai,
   model,
-  instructions,
-  input,
+  messages,
   providerLabel,
   maxToolCalls,
   isDebug,
 }: {
   openai: OpenAI;
   model: string;
-  instructions?: string;
-  input: Responses.ResponseInputItem[];
+  messages: OpenAI.Chat.ChatCompletionMessageParam[];
   providerLabel?: string;
   maxToolCalls?: number;
   isDebug: boolean;
@@ -158,25 +212,35 @@ async function finalizeOpenAIWithoutTools({
       ? getToolLimitFallbackPrompt(providerLabel, maxToolCalls)
       : TOOL_LIMIT_FALLBACK_PROMPT;
 
+  const lastMessage = messages[messages.length - 1];
+  const finalMessages = [...messages];
+
+  if (lastMessage && lastMessage.role === "user") {
+    const newContent = Array.isArray(lastMessage.content)
+      ? [...lastMessage.content, { type: "text", text: content }]
+      : `${lastMessage.content}\n\n${content}`;
+    finalMessages[finalMessages.length - 1] = {
+      ...lastMessage,
+      content: newContent as any,
+    };
+  } else {
+    finalMessages.push({ role: "user", content });
+  }
+
   const response = await withLlmRetry({
     provider: "openai",
     model,
     isDebug,
-    fn: () =>
-      openai.responses.create({
+    fn: async () => {
+      await waitForLlmRequestSlot("openai");
+      return openai.chat.completions.create({
         model,
-        instructions,
-        input: [
-          ...input,
-          {
-            role: "user",
-            content,
-          },
-        ],
-      }),
+        messages: finalMessages as any,
+      });
+    },
   });
 
-  return normalizeText(response.output_text || "");
+  return normalizeText(response.choices[0]?.message?.content || "");
 }
 
 async function finalizeAnthropicWithoutTools({
@@ -211,22 +275,33 @@ async function finalizeAnthropicWithoutTools({
     });
   }
 
+  const lastMessage = messages[messages.length - 1];
+  const finalMessages = [...messages];
+
+  if (lastMessage && lastMessage.role === "user") {
+    const newContent = Array.isArray(lastMessage.content)
+      ? [...lastMessage.content, { type: "text", text: content }]
+      : `${lastMessage.content}\n\n${content}`;
+    finalMessages[finalMessages.length - 1] = {
+      ...lastMessage,
+      content: newContent as any,
+    };
+  } else {
+    finalMessages.push({ role: "user", content });
+  }
+
   const msg = await withLlmRetry({
     provider: "anthropic",
     model,
     isDebug,
-    fn: () =>
-      anthropic.messages.create({
+    fn: async () => {
+      await waitForLlmRequestSlot("anthropic");
+      return anthropic.messages.create({
         model,
         max_tokens: 2048,
-        messages: [
-          ...messages,
-          {
-            role: "user",
-            content,
-          },
-        ],
-      }),
+        messages: finalMessages as any,
+      });
+    },
   });
 
   return normalizeText(msg);
@@ -254,21 +329,28 @@ async function finalizeGeminiWithoutTools({
       ? getToolLimitFallbackPrompt(providerLabel, maxToolCalls)
       : TOOL_LIMIT_FALLBACK_PROMPT;
 
+  const lastContent = contents[contents.length - 1];
+  const finalContents = [...contents];
+
+  if (lastContent && lastContent.role === "user") {
+    const newParts = [...(lastContent.parts || []), { text: content }];
+    finalContents[finalContents.length - 1] = {
+      ...lastContent,
+      parts: newParts,
+    };
+  } else {
+    finalContents.push({ role: "user", parts: [{ text: content }] });
+  }
+
   const response = await withLlmRetry({
     provider: "gemini",
     model,
     isDebug,
     fn: async () => {
-      await waitForGeminiSlot();
+      await waitForLlmRequestSlot("gemini");
       return gemini.models.generateContent({
         model,
-        contents: [
-          ...contents,
-          {
-            role: "user",
-            parts: [{ text: content }],
-          },
-        ],
+        contents: finalContents,
         config: {
           systemInstruction,
         },
@@ -279,21 +361,36 @@ async function finalizeGeminiWithoutTools({
   return normalizeText(response.text || "");
 }
 
-export async function generateText(opts: {
+export interface GenerateTextResult {
+  text: string;
+  usedFallback: boolean;
+}
+
+type GenerateTextOptions = {
   provider?: string;
   model?: string;
   prompt: string;
   systemInstruction?: string;
   useSearchTool?: boolean;
   geminiTools?: GeminiToolDefinition[];
-  openaiTools?: Responses.FunctionTool[];
+  openaiTools?: OpenAI.Chat.ChatCompletionTool[];
   anthropicTools?: Anthropic.Tool[];
-}): Promise<string> {
+};
+
+export async function generateText(opts: GenerateTextOptions): Promise<string> {
+  const result = await generateTextWithMeta(opts);
+  return result.text;
+}
+
+export async function generateTextWithMeta(
+  opts: GenerateTextOptions,
+): Promise<GenerateTextResult> {
   const provider = getProvider(opts.provider) || "gemini";
+  assertProviderApiKeyConfigured(provider);
   const model = opts.model?.trim() || "gemini-2.5-flash";
   const isDebug = process.env.DEBUG_LLM_ROUTER === "true";
-  const startedAt = Date.now();
   let text = "";
+  let usedFallback = false;
   let resolvedModel = model;
 
   // if (isDebug) {
@@ -312,52 +409,51 @@ export async function generateText(opts: {
     const hasOpenAITools = (opts.openaiTools?.length || 0) > 0;
     const openaiTools = opts.openaiTools ?? [];
 
+    let messages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
+    if (opts.systemInstruction) {
+      messages.push({ role: "system", content: opts.systemInstruction });
+    }
+    messages.push({ role: "user", content: opts.prompt });
+
     if (!hasOpenAITools) {
       const response = await withLlmRetry({
         provider,
         model: resolvedModel,
         isDebug,
-        fn: () =>
-          openai.responses.create({
+        fn: async () => {
+          await waitForLlmRequestSlot("openai");
+          return openai.chat.completions.create({
             model: resolvedModel,
-            input: opts.prompt,
-            instructions: opts.systemInstruction,
-          }),
+            messages,
+          });
+        },
       });
-      text = normalizeText(response.output_text || "");
+      text = normalizeText(response.choices[0]?.message?.content || "");
     } else {
-      let inputItems: Responses.ResponseInputItem[] = [
-        { role: "user", content: opts.prompt },
-      ];
       let totalToolCalls = 0;
 
-      for (
-        let attempt = 0;
-        attempt < MAX_OPENAI_TOOL_ITERATIONS;
-        attempt += 1
-      ) {
+      for (let attempt = 0; attempt < MAX_TOOL_ITERATIONS; attempt += 1) {
         const response = await withLlmRetry({
           provider,
           model: resolvedModel,
           isDebug,
-          fn: () =>
-            openai.responses.create({
+          fn: async () => {
+            await waitForLlmRequestSlot("openai");
+            return openai.chat.completions.create({
               model: resolvedModel,
-              instructions: opts.systemInstruction,
               tools: openaiTools,
-              input: inputItems,
-            }),
+              messages,
+            });
+          },
         });
 
-        const outputItems = Array.isArray(response.output)
-          ? response.output
-          : [];
-        const functionCalls = outputItems.filter(
-          (item: any) => item?.type === "function_call",
-        ) as Responses.ResponseFunctionToolCall[];
+        const responseMessage = response.choices[0]?.message;
+        if (!responseMessage) break;
 
-        if (functionCalls.length === 0) {
-          text = normalizeText(response.output_text || "");
+        const toolCalls = responseMessage.tool_calls || [];
+
+        if (toolCalls.length === 0) {
+          text = normalizeText(responseMessage.content || "");
           if (isDebug) {
             console.warn("[llmRouter] openai-tool-loop-complete", {
               iterationsUsed: attempt + 1,
@@ -367,75 +463,76 @@ export async function generateText(opts: {
           break;
         }
 
-        totalToolCalls += functionCalls.length;
+        const nextTotalToolCalls = totalToolCalls + toolCalls.length;
+
         if (isDebug) {
           console.warn("[llmRouter] openai-tool-calls", {
             iteration: attempt + 1,
-            toolCallsThisIteration: functionCalls.length,
-            totalToolCalls,
-            toolNames: functionCalls.map((item) => item.name),
+            toolCallsThisIteration: toolCalls.length,
+            totalToolCalls: nextTotalToolCalls,
+            toolNames: toolCalls.map((call) => call.function.name),
           });
         }
-        if (totalToolCalls > MAX_OPENAI_TOOL_CALLS) {
+        if (nextTotalToolCalls > MAX_TOOL_CALLS) {
           if (isDebug) {
             console.warn("[llmRouter] openai-tool-call-limit-hit", {
               iteration: attempt + 1,
-              totalToolCalls,
-              maxToolCalls: MAX_OPENAI_TOOL_CALLS,
+              totalToolCalls: nextTotalToolCalls,
+              maxToolCalls: MAX_TOOL_CALLS,
             });
           }
+          usedFallback = true;
           text = await finalizeOpenAIWithoutTools({
             openai,
             model: resolvedModel,
-            instructions: opts.systemInstruction,
-            input: inputItems,
+            messages,
             providerLabel: "OpenAI",
-            maxToolCalls: MAX_OPENAI_TOOL_CALLS,
+            maxToolCalls: MAX_TOOL_CALLS,
             isDebug,
           });
           break;
         }
 
-        const toolOutputs: OpenAIFunctionCallOutputInputItem[] = [];
-        for (const functionCall of functionCalls) {
+        messages.push(responseMessage);
+        totalToolCalls = nextTotalToolCalls;
+
+        for (const toolCall of toolCalls) {
           let parsedArgs: Record<string, unknown> = {};
           try {
-            parsedArgs = functionCall.arguments
-              ? JSON.parse(functionCall.arguments)
+            parsedArgs = toolCall.function.arguments
+              ? JSON.parse(toolCall.function.arguments)
               : {};
           } catch {
             parsedArgs = {};
           }
 
           const result = await executeOpenAITool({
-            name: functionCall.name,
+            name: toolCall.function.name,
             args: parsedArgs,
           });
 
           if (isDebug) {
             console.warn("[llmRouter] openai-tool-response", {
               iteration: attempt + 1,
-              toolName: functionCall.name,
+              toolName: toolCall.function.name,
               ok: result?.ok ?? null,
             });
           }
 
-          toolOutputs.push({
-            type: "function_call_output",
-            call_id: functionCall.call_id,
-            output: JSON.stringify(result),
+          messages.push({
+            role: "tool",
+            tool_call_id: toolCall.id,
+            content: JSON.stringify(result),
           });
         }
-
-        inputItems = [...inputItems, ...outputItems, ...toolOutputs];
       }
 
       if (!text) {
+        usedFallback = true;
         text = await finalizeOpenAIWithoutTools({
           openai,
           model: resolvedModel,
-          instructions: opts.systemInstruction,
-          input: inputItems,
+          messages,
           isDebug,
         });
       }
@@ -454,12 +551,14 @@ export async function generateText(opts: {
         provider,
         model: resolvedModel,
         isDebug,
-        fn: () =>
-          anthropic.messages.create({
+        fn: async () => {
+          await waitForLlmRequestSlot("anthropic");
+          return anthropic.messages.create({
             model: resolvedModel,
             max_tokens: 2048,
             messages: [{ role: "user", content: systemPrefix + opts.prompt }],
-          }),
+          });
+        },
       });
       text = normalizeText(msg);
     } else {
@@ -468,22 +567,20 @@ export async function generateText(opts: {
       ];
       let totalToolCalls = 0;
 
-      for (
-        let attempt = 0;
-        attempt < MAX_ANTHROPIC_TOOL_ITERATIONS;
-        attempt += 1
-      ) {
+      for (let attempt = 0; attempt < MAX_TOOL_ITERATIONS; attempt += 1) {
         const msg = await withLlmRetry({
           provider,
           model: resolvedModel,
           isDebug,
-          fn: () =>
-            anthropic.messages.create({
+          fn: async () => {
+            await waitForLlmRequestSlot("anthropic");
+            return anthropic.messages.create({
               model: resolvedModel,
               max_tokens: 2048,
               tools: anthropicTools,
               messages,
-            }),
+            });
+          },
         });
 
         const contentBlocks = Array.isArray(msg.content) ? msg.content : [];
@@ -511,20 +608,21 @@ export async function generateText(opts: {
             toolNames: toolUses.map((item) => item.name),
           });
         }
-        if (totalToolCalls > MAX_ANTHROPIC_TOOL_CALLS) {
+        if (totalToolCalls > MAX_TOOL_CALLS) {
           if (isDebug) {
             console.warn("[llmRouter] anthropic-tool-call-limit-hit", {
               iteration: attempt + 1,
               totalToolCalls,
-              maxToolCalls: MAX_ANTHROPIC_TOOL_CALLS,
+              maxToolCalls: MAX_TOOL_CALLS,
             });
           }
+          usedFallback = true;
           text = await finalizeAnthropicWithoutTools({
             anthropic,
             model: resolvedModel,
             messages,
             providerLabel: "Anthropic",
-            maxToolCalls: MAX_ANTHROPIC_TOOL_CALLS,
+            maxToolCalls: MAX_TOOL_CALLS,
             reason: "tool-limit-hit",
             isDebug,
           });
@@ -572,6 +670,7 @@ export async function generateText(opts: {
       }
 
       if (!text) {
+        usedFallback = true;
         text = await finalizeAnthropicWithoutTools({
           anthropic,
           model: resolvedModel,
@@ -602,7 +701,7 @@ export async function generateText(opts: {
         model: resolvedModel,
         isDebug,
         fn: async () => {
-          await waitForGeminiSlot();
+          await waitForLlmRequestSlot("gemini");
           return gemini.models.generateContent({
             model: resolvedModel,
             contents: opts.prompt,
@@ -617,17 +716,13 @@ export async function generateText(opts: {
       let contents: any = [{ role: "user", parts: [{ text: opts.prompt }] }];
       let totalToolCalls = 0;
 
-      for (
-        let attempt = 0;
-        attempt < MAX_GEMINI_TOOL_ITERATIONS;
-        attempt += 1
-      ) {
+      for (let attempt = 0; attempt < MAX_TOOL_ITERATIONS; attempt += 1) {
         const response = await withLlmRetry({
           provider,
           model: resolvedModel,
           isDebug,
           fn: async () => {
-            await waitForGeminiSlot();
+            await waitForLlmRequestSlot("gemini");
             return gemini.models.generateContent({
               model: resolvedModel,
               contents,
@@ -669,21 +764,22 @@ export async function generateText(opts: {
               .filter(Boolean),
           });
         }
-        if (totalToolCalls > MAX_GEMINI_TOOL_CALLS) {
+        if (totalToolCalls > MAX_TOOL_CALLS) {
           if (isDebug && hasGeminiFunctionTools) {
             console.warn("[llmRouter] gemini-tool-call-limit-hit", {
               iteration: attempt + 1,
               totalToolCalls,
-              maxToolCalls: MAX_GEMINI_TOOL_CALLS,
+              maxToolCalls: MAX_TOOL_CALLS,
             });
           }
+          usedFallback = true;
           text = await finalizeGeminiWithoutTools({
             gemini,
             model: resolvedModel,
             contents,
             systemInstruction: opts.systemInstruction,
             providerLabel: "Gemini",
-            maxToolCalls: MAX_GEMINI_TOOL_CALLS,
+            maxToolCalls: MAX_TOOL_CALLS,
             isDebug,
           });
           break;
@@ -714,7 +810,10 @@ export async function generateText(opts: {
           toolResponses.push({
             functionResponse: {
               name: functionCall.name,
-              response: result,
+              response:
+                typeof result === "object" && result !== null
+                  ? result
+                  : { value: result },
             },
           });
         }
@@ -733,6 +832,7 @@ export async function generateText(opts: {
       }
 
       if (!text) {
+        usedFallback = true;
         text = await finalizeGeminiWithoutTools({
           gemini,
           model: resolvedModel,
@@ -754,5 +854,8 @@ export async function generateText(opts: {
   //   console.warn("[llmRouter] output", text);
   // }
 
-  return text;
+  return {
+    text,
+    usedFallback,
+  };
 }

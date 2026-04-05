@@ -1,4 +1,4 @@
-import { searchTomTom } from "../utils/tomtomSearch.js";
+import { isTomTomResultMatch, searchTomTom } from "./tomtomSearch.js";
 
 export interface GeminiToolDefinition {
   functionDeclarations: Array<{
@@ -10,7 +10,7 @@ export interface GeminiToolDefinition {
 
 export interface GeminiToolExecutionContext {
   name: string;
-  args: Record<string, unknown>;
+  args: any;
 }
 
 export function getGeminiVerificationTools(): GeminiToolDefinition[] {
@@ -26,7 +26,8 @@ export function getGeminiVerificationTools(): GeminiToolDefinition[] {
             properties: {
               name: {
                 type: "STRING",
-                description: "The exact or best-known name of the place to verify.",
+                description:
+                  "The exact or best-known name of the place to verify.",
               },
               locationHint: {
                 type: "STRING",
@@ -45,10 +46,9 @@ export function getGeminiVerificationTools(): GeminiToolDefinition[] {
 export async function executeGeminiTool({
   name,
   args,
-}: GeminiToolExecutionContext): Promise<Record<string, unknown>> {
+}: GeminiToolExecutionContext): Promise<any> {
   if (name === "search_place") {
-    const placeName =
-      typeof args.name === "string" ? args.name.trim() : "";
+    const placeName = typeof args.name === "string" ? args.name.trim() : "";
     const locationHint =
       typeof args.locationHint === "string" ? args.locationHint.trim() : "";
 
@@ -65,12 +65,28 @@ export async function executeGeminiTool({
       limit: 1,
     });
     const result = results[0] || null;
+    const isMatch = isTomTomResultMatch({
+      placeName,
+      locationHint,
+      result,
+    });
 
     if (process.env.DEBUG_LLM_ROUTER === "true") {
       console.warn("[geminiTools] search_place-result", {
         query,
+        isMatch,
         result,
       });
+    }
+
+    if (!isMatch) {
+      return {
+        ok: false,
+        query,
+        error:
+          "Top search result did not match the requested place closely enough.",
+        result: null,
+      };
     }
 
     return {

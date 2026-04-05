@@ -1,7 +1,17 @@
-import { generateText } from "./utils/llmRouter.js";
-import { formatFoodPreferences } from "./utils/foodPreferences.js";
-import { formatLodgingPreferences } from "./utils/lodgingPreferences.js";
-import { formatPreferredLocation, formatTravelerType } from "./utils/tripContext.js";
+import crypto from "crypto";
+import { assertProviderApiKeysConfigured, generateText } from "../utils/llmRouter.js";
+import {
+  validateRecommendationsResponse,
+  validateTravelFormData,
+} from "../utils/requestValidation.js";
+import { readJsonBody } from "../utils/http.js";
+import { assertRedisConfigured, getRedisClient } from "../utils/redis.js";
+import { formatFoodPreferences } from "../utils/foodPreferences.js";
+import { formatLodgingPreferences } from "../utils/lodgingPreferences.js";
+import {
+  formatPreferredLocation,
+  formatTravelerType,
+} from "../utils/tripContext.js";
 
 function sendJson(res: any, status: number, data: any) {
   res.statusCode = status;
@@ -9,18 +19,6 @@ function sendJson(res: any, status: number, data: any) {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Cache-Control", "no-store");
   res.end(JSON.stringify(data));
-}
-
-async function readJsonBody(req: any) {
-  if (req.body) {
-    if (typeof req.body === "string") {
-      return JSON.parse(req.body || "{}");
-    }
-    return req.body;
-  }
-  let body = "";
-  for await (const chunk of req) body += chunk;
-  return JSON.parse(body || "{}");
 }
 
 const monthLabels: Record<string, string> = {
@@ -38,6 +36,12 @@ const monthLabels: Record<string, string> = {
   Dec: "December (winter)",
 };
 
+function sanitize(str: any) {
+  return String(str || "").replace(/[<>]/g, (c) =>
+    c === "<" ? "&lt;" : "&gt;",
+  );
+}
+
 export default async function handler(req: any, res: any) {
   if (req.method === "OPTIONS") {
     res.statusCode = 204;
@@ -47,13 +51,18 @@ export default async function handler(req: any, res: any) {
     return sendJson(res, 405, { error: "Method not allowed" });
 
   try {
-    const data = await readJsonBody(req);
+    assertProviderApiKeysConfigured(["gemini"]);
+    assertRedisConfigured();
+
+    const data = validateTravelFormData(await readJsonBody(req));
     const foodPreferences = formatFoodPreferences(data.foodPreferences || {});
     const lodgingPreferences = formatLodgingPreferences(
       data.lodgingPreferences || {},
     );
     const travelerType = formatTravelerType(data.travelers);
-    const preferredLocation = formatPreferredLocation(data.preferredLocation || {});
+    const preferredLocation = formatPreferredLocation(
+      data.preferredLocation || {},
+    );
     const timeOfYear =
       data.timeOfYear?.length > 0
         ? data.timeOfYear
@@ -61,26 +70,49 @@ export default async function handler(req: any, res: any) {
             .join(", ")
         : "Not specified. Recommend the best realistic time to visit.";
 
+    const durationValue = data.durationValue;
+
+    const cacheKey =
+      "recs:" +
+      crypto
+        .createHash("sha256")
+        .update(JSON.stringify({ version: 2, data }))
+        .digest("hex");
+    const redis = await getRedisClient();
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        const cachedJson = String(cached);
+        return sendJson(
+          res,
+          200,
+          validateRecommendationsResponse(JSON.parse(cachedJson)),
+        );
+      }
+    } catch (err) {
+      console.warn("[recommendations] Redis read error", err);
+    }
+
     const prompt = `
     Based on the travel preferences below, provide exactly 3 travel recommendations.
 
     USER PREFERENCES
     Time of Year: ${timeOfYear}
-    Duration: ${data.durationValue} ${data.durationUnit}
+    Duration: ${durationValue} ${sanitize(data.durationUnit)}
     Travel Style: ${travelerType}
     Budget (Treat as upper limit, with +/- 20% flexibility only when clearly justified):
       - Lodging: $${data.budget?.lodging || "Any"} per night
       - Local Transportation at Destination: $${data.budget?.localTransportation || "Any"} total
       - Food: $${data.budget?.food || "Any"} per day
       - Miscellaneous/Activities: $${data.budget?.misc || "Any"} total
-    Primary Goal(s): ${data.primaryGoal?.length > 0 ? data.primaryGoal.join(", ") : "Any"}
+    Primary Goal(s): <goals>${data.primaryGoal?.length > 0 ? sanitize(data.primaryGoal.join(", ")) : "Any"}</goals>
     FOOD PREFERENCES
     ${foodPreferences}
     LODGING PREFERENCES
     ${lodgingPreferences}
     Local Transportation Preferences: ${data.localTransportation?.length > 0 ? data.localTransportation.join(", ") : "Any"}
     Preferred Location: ${preferredLocation}
-    Attractions of Interest: ${data.attractionInterests || "None specified"}
+    Attractions of Interest: <attractions>${sanitize(data.attractionInterests) || "None specified"}</attractions>
 
     DECISION RULES
     - You MUST stay strictly inside the requested country and state/province. If a city is provided, stay inside that city as well.
@@ -175,37 +207,79 @@ export default async function handler(req: any, res: any) {
     - Confirm the recommendation is geographically compact enough to feel realistic for the trip length.
   `;
 
-    const text = await generateText({
-      provider: "gemini",
-      model: "gemini-2.5-flash",
-      prompt,
-      systemInstruction:
-        "You are an elite travel concierge. At this stage, your job is to recommend destination concepts, not verified bookings. Use general destination knowledge and avoid web search in this stage. Do not include hotels, restaurants, exact addresses, opening hours, or official websites. Food preferences should usually be treated as a downstream itinerary constraint unless food is a primary travel goal. Provide factual, realistic recommendations grounded in the user's budget and travel goals.",
-      useSearchTool: false,
-    });
+    let parsed = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const text = await generateText({
+        provider: "gemini",
+        model: "gemini-2.5-flash",
+        prompt,
+        systemInstruction:
+          "You are an elite travel concierge. At this stage, your job is to recommend destination concepts, not verified bookings. Use general destination knowledge and avoid web search in this stage. Do not include hotels, restaurants, exact addresses, opening hours, or official websites. Food preferences should usually be treated as a downstream itinerary constraint unless food is a primary travel goal. Provide factual, realistic recommendations grounded in the user's budget and travel goals.",
+        useSearchTool: false,
+      });
 
-    let parsedText = text || "[]";
-    const firstBracket = text.indexOf("[");
-    const lastBracket = text.lastIndexOf("]");
+      let parsedText = text || "[]";
+      const firstBracket = parsedText.indexOf("[");
+      const lastBracket = parsedText.lastIndexOf("]");
 
-    if (
-      firstBracket !== -1 &&
-      lastBracket !== -1 &&
-      lastBracket > firstBracket
-    ) {
-      parsedText = text.substring(firstBracket, lastBracket + 1);
+      if (
+        firstBracket !== -1 &&
+        lastBracket !== -1 &&
+        lastBracket > firstBracket
+      ) {
+        parsedText = parsedText.substring(firstBracket, lastBracket + 1);
+      }
+
+      try {
+        parsed = validateRecommendationsResponse(JSON.parse(parsedText));
+        break;
+      } catch (err) {
+        console.warn(
+          `[recommendations] JSON parse failed on attempt ${attempt + 1}`,
+        );
+      }
     }
 
-    try {
-      const parsed = JSON.parse(parsedText);
-      return sendJson(res, 200, parsed);
-    } catch {
+    if (!parsed) {
       return sendJson(res, 502, {
-        error: "Failed to parse recommendations from AI.",
+        error: "Failed to parse recommendations from AI after retries.",
       });
     }
-  } catch (err) {
+
+    redis
+      .set(cacheKey, JSON.stringify(parsed), {
+        EX: 86400, // Cache for 24 hours
+      })
+      .catch((err) =>
+        console.warn("[recommendations] Redis write error", err),
+      );
+
+    return sendJson(res, 200, parsed);
+  } catch (err: any) {
     console.error(err);
+    if (err?.name === "RequestValidationError") {
+      return sendJson(res, 400, { error: err.message });
+    }
+    if (err?.name === "InvalidJsonBodyError") {
+      return sendJson(res, 400, { error: err.message });
+    }
+    if (err?.name === "RequestBodyTooLargeError") {
+      return sendJson(res, 413, { error: err.message });
+    }
+    if (err?.name === "LlmConfigurationError") {
+      return sendJson(res, 500, { error: err.message });
+    }
+    if (
+      err?.name === "RedisConfigurationError" ||
+      err?.name === "RedisConnectionError"
+    ) {
+      return sendJson(res, 500, { error: err.message });
+    }
+    if (err?.status === 429 || err?.message?.includes("rate limit")) {
+      return sendJson(res, 429, {
+        error: "Our AI is currently busy. Please wait a moment and try again!",
+      });
+    }
     return sendJson(res, 500, { error: "Server error" });
   }
 }
