@@ -56,6 +56,12 @@ const monthLabels: Record<string, string> = {
   Dec: "December (winter)",
 };
 
+function sanitize(str: any) {
+  return String(str || "").replace(/[<>]/g, (c) =>
+    c === "<" ? "&lt;" : "&gt;",
+  );
+}
+
 export default async function handler(req: any, res: any) {
   if (req.method === "OPTIONS") {
     res.statusCode = 204;
@@ -93,6 +99,13 @@ export default async function handler(req: any, res: any) {
       });
     }
 
+    const durationValue = Number(data.durationValue);
+    if (isNaN(durationValue) || durationValue <= 0) {
+      return sendJson(res, 400, {
+        error: "Invalid duration value. Must be a number.",
+      });
+    }
+
     const draftSystemInstruction =
       "You are an elite travel concierge focused on drafting realistic trip plans before final verification. Use general destination knowledge only, avoid web search, and do not include exact addresses, URLs, or opening hours. Favor realistic pacing, geographic coherence, transportation practicality, and budget realism. Never invent precise facts to make a recommendation sound more certain than it is.";
 
@@ -105,10 +118,10 @@ export default async function handler(req: any, res: any) {
     Preferred Location: ${preferredLocation}
     Trip Context: ${recommendation.description}
     Time of Year: ${timeOfYear}
-    Duration: ${data.durationValue} ${data.durationUnit}
+    Duration: ${durationValue} ${sanitize(data.durationUnit)}
     Travel Style: ${travelerType}
-    Primary Goal(s): ${data.primaryGoal?.length > 0 ? data.primaryGoal.join(", ") : "Any"}
-    Attractions of Interest: ${data.attractionInterests || "None specified"}
+    Primary Goal(s): <goals>${data.primaryGoal?.length > 0 ? sanitize(data.primaryGoal.join(", ")) : "Any"}</goals>
+    Attractions of Interest: <attractions>${sanitize(data.attractionInterests) || "None specified"}</attractions>
     Local Transportation Preferences: ${data.localTransportation?.length > 0 ? data.localTransportation.join(", ") : "Any"}
     Budget (Treat as upper limit, +/- 20% acceptable):
       - Lodging: $${data.budget?.lodging || "Any"} per night
@@ -374,16 +387,21 @@ export default async function handler(req: any, res: any) {
     return sendJson(res, 200, {
       itinerary: itinerary || draftPlan,
     });
-  } catch (err) {
+  } catch (err: any) {
     console.error(err);
-    if (err instanceof RequestValidationError) {
+    if (err?.name === "RequestValidationError") {
       return sendJson(res, 400, { error: err.message });
     }
-    if (err instanceof LlmConfigurationError) {
+    if (err?.name === "LlmConfigurationError") {
       return sendJson(res, 500, { error: err.message });
     }
-    if (err instanceof TomTomConfigurationError) {
+    if (err?.name === "TomTomConfigurationError") {
       return sendJson(res, 500, { error: err.message });
+    }
+    if (err?.status === 429 || err?.message?.includes("rate limit")) {
+      return sendJson(res, 429, {
+        error: "Our AI is currently busy. Please wait a moment and try again!",
+      });
     }
     return sendJson(res, 500, { error: "Server error" });
   }

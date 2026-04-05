@@ -9,7 +9,10 @@ import {
 } from "./utils/requestValidation.js";
 import { formatFoodPreferences } from "./utils/foodPreferences.js";
 import { formatLodgingPreferences } from "./utils/lodgingPreferences.js";
-import { formatPreferredLocation, formatTravelerType } from "./utils/tripContext.js";
+import {
+  formatPreferredLocation,
+  formatTravelerType,
+} from "./utils/tripContext.js";
 
 function sendJson(res: any, status: number, data: any) {
   res.statusCode = status;
@@ -46,6 +49,12 @@ const monthLabels: Record<string, string> = {
   Dec: "December (winter)",
 };
 
+function sanitize(str: any) {
+  return String(str || "").replace(/[<>]/g, (c) =>
+    c === "<" ? "&lt;" : "&gt;",
+  );
+}
+
 export default async function handler(req: any, res: any) {
   if (req.method === "OPTIONS") {
     res.statusCode = 204;
@@ -63,7 +72,9 @@ export default async function handler(req: any, res: any) {
       data.lodgingPreferences || {},
     );
     const travelerType = formatTravelerType(data.travelers);
-    const preferredLocation = formatPreferredLocation(data.preferredLocation || {});
+    const preferredLocation = formatPreferredLocation(
+      data.preferredLocation || {},
+    );
     const timeOfYear =
       data.timeOfYear?.length > 0
         ? data.timeOfYear
@@ -71,26 +82,33 @@ export default async function handler(req: any, res: any) {
             .join(", ")
         : "Not specified. Recommend the best realistic time to visit.";
 
+    const durationValue = Number(data.durationValue);
+    if (isNaN(durationValue) || durationValue <= 0) {
+      return sendJson(res, 400, {
+        error: "Invalid duration value. Must be a number.",
+      });
+    }
+
     const prompt = `
     Based on the travel preferences below, provide exactly 3 travel recommendations.
 
     USER PREFERENCES
     Time of Year: ${timeOfYear}
-    Duration: ${data.durationValue} ${data.durationUnit}
+    Duration: ${durationValue} ${sanitize(data.durationUnit)}
     Travel Style: ${travelerType}
     Budget (Treat as upper limit, with +/- 20% flexibility only when clearly justified):
       - Lodging: $${data.budget?.lodging || "Any"} per night
       - Local Transportation at Destination: $${data.budget?.localTransportation || "Any"} total
       - Food: $${data.budget?.food || "Any"} per day
       - Miscellaneous/Activities: $${data.budget?.misc || "Any"} total
-    Primary Goal(s): ${data.primaryGoal?.length > 0 ? data.primaryGoal.join(", ") : "Any"}
+    Primary Goal(s): <goals>${data.primaryGoal?.length > 0 ? sanitize(data.primaryGoal.join(", ")) : "Any"}</goals>
     FOOD PREFERENCES
     ${foodPreferences}
     LODGING PREFERENCES
     ${lodgingPreferences}
     Local Transportation Preferences: ${data.localTransportation?.length > 0 ? data.localTransportation.join(", ") : "Any"}
     Preferred Location: ${preferredLocation}
-    Attractions of Interest: ${data.attractionInterests || "None specified"}
+    Attractions of Interest: <attractions>${sanitize(data.attractionInterests) || "None specified"}</attractions>
 
     DECISION RULES
     - You MUST stay strictly inside the requested country and state/province. If a city is provided, stay inside that city as well.
@@ -185,42 +203,58 @@ export default async function handler(req: any, res: any) {
     - Confirm the recommendation is geographically compact enough to feel realistic for the trip length.
   `;
 
-    const text = await generateText({
-      provider: "gemini",
-      model: "gemini-2.5-flash",
-      prompt,
-      systemInstruction:
-        "You are an elite travel concierge. At this stage, your job is to recommend destination concepts, not verified bookings. Use general destination knowledge and avoid web search in this stage. Do not include hotels, restaurants, exact addresses, opening hours, or official websites. Food preferences should usually be treated as a downstream itinerary constraint unless food is a primary travel goal. Provide factual, realistic recommendations grounded in the user's budget and travel goals.",
-      useSearchTool: false,
-    });
+    let parsed = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const text = await generateText({
+        provider: "gemini",
+        model: "gemini-2.5-flash",
+        prompt,
+        systemInstruction:
+          "You are an elite travel concierge. At this stage, your job is to recommend destination concepts, not verified bookings. Use general destination knowledge and avoid web search in this stage. Do not include hotels, restaurants, exact addresses, opening hours, or official websites. Food preferences should usually be treated as a downstream itinerary constraint unless food is a primary travel goal. Provide factual, realistic recommendations grounded in the user's budget and travel goals.",
+        useSearchTool: false,
+      });
 
-    let parsedText = text || "[]";
-    const firstBracket = text.indexOf("[");
-    const lastBracket = text.lastIndexOf("]");
+      let parsedText = text || "[]";
+      const firstBracket = parsedText.indexOf("[");
+      const lastBracket = parsedText.lastIndexOf("]");
 
-    if (
-      firstBracket !== -1 &&
-      lastBracket !== -1 &&
-      lastBracket > firstBracket
-    ) {
-      parsedText = text.substring(firstBracket, lastBracket + 1);
+      if (
+        firstBracket !== -1 &&
+        lastBracket !== -1 &&
+        lastBracket > firstBracket
+      ) {
+        parsedText = parsedText.substring(firstBracket, lastBracket + 1);
+      }
+
+      try {
+        parsed = JSON.parse(parsedText);
+        break;
+      } catch (err) {
+        console.warn(
+          `[recommendations] JSON parse failed on attempt ${attempt + 1}`,
+        );
+      }
     }
 
-    try {
-      const parsed = JSON.parse(parsedText);
-      return sendJson(res, 200, parsed);
-    } catch {
+    if (!parsed) {
       return sendJson(res, 502, {
-        error: "Failed to parse recommendations from AI.",
+        error: "Failed to parse recommendations from AI after retries.",
       });
     }
-  } catch (err) {
+
+    return sendJson(res, 200, parsed);
+  } catch (err: any) {
     console.error(err);
-    if (err instanceof RequestValidationError) {
+    if (err?.name === "RequestValidationError") {
       return sendJson(res, 400, { error: err.message });
     }
-    if (err instanceof LlmConfigurationError) {
+    if (err?.name === "LlmConfigurationError") {
       return sendJson(res, 500, { error: err.message });
+    }
+    if (err?.status === 429 || err?.message?.includes("rate limit")) {
+      return sendJson(res, 429, {
+        error: "Our AI is currently busy. Please wait a moment and try again!",
+      });
     }
     return sendJson(res, 500, { error: "Server error" });
   }

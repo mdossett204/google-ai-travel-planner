@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import type { Responses } from "openai/resources/responses/responses";
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenAI } from "@google/genai";
+import { createClient } from "redis";
 import {
   executeGeminiTool,
   type GeminiToolDefinition,
@@ -33,6 +34,35 @@ const GEMINI_MIN_INTERVAL_MS = 6000;
 let lastGeminiRequestAt = 0;
 let geminiQueue: Promise<void> = Promise.resolve();
 
+const redisUrl = process.env.REDIS_URL;
+const redisClient = redisUrl ? createClient({ url: redisUrl }) : null;
+let isRedisConnected = false;
+
+async function getRedisClient() {
+  if (!redisClient) return null;
+  if (!isRedisConnected) {
+    redisClient.on("error", (err: any) => console.error("Redis error:", err));
+    await redisClient.connect();
+    isRedisConnected = true;
+  }
+  return redisClient;
+}
+
+async function checkRateLimit(key: string, limit: number, windowSec: number) {
+  const client = await getRedisClient();
+  if (!client) return true;
+
+  const currentWindow = Math.floor(Date.now() / (windowSec * 1000));
+  const redisKey = `ratelimit:${key}:${currentWindow}`;
+
+  const requests = await client.incr(redisKey);
+  if (requests === 1) {
+    await client.expire(redisKey, windowSec * 2);
+  }
+
+  return requests <= limit;
+}
+
 interface GeminiFunctionCall {
   name: string;
   args?: Record<string, unknown>;
@@ -49,6 +79,16 @@ function sleep(ms: number) {
 }
 
 async function waitForGeminiSlot() {
+  if (redisUrl) {
+    const success = await checkRateLimit("gemini-global-limit", 1, 60);
+    if (!success) {
+      const error: any = new Error("Global rate limit exceeded");
+      error.status = 429;
+      throw error;
+    }
+    return;
+  }
+
   const previous = geminiQueue;
   let release!: () => void;
 
@@ -750,7 +790,10 @@ export async function generateText(opts: {
           toolResponses.push({
             functionResponse: {
               name: functionCall.name,
-              response: result,
+              response:
+                typeof result === "object" && result !== null
+                  ? result
+                  : { value: result },
             },
           });
         }

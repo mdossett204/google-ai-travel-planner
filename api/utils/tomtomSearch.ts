@@ -1,3 +1,5 @@
+import { createClient } from "redis";
+
 export interface TomTomSearchOptions {
   query: string;
   limit?: number;
@@ -43,6 +45,35 @@ const tomTomCache = new Map<
   { expiresAt: number; results: TomTomSearchResult[] }
 >();
 
+const redisUrl = process.env.REDIS_URL;
+const redisClient = redisUrl ? createClient({ url: redisUrl }) : null;
+let isRedisConnected = false;
+
+async function getRedisClient() {
+  if (!redisClient) return null;
+  if (!isRedisConnected) {
+    redisClient.on("error", (err: any) => console.error("Redis error:", err));
+    await redisClient.connect();
+    isRedisConnected = true;
+  }
+  return redisClient;
+}
+
+async function checkRateLimit(key: string, limit: number, windowSec: number) {
+  const client = await getRedisClient();
+  if (!client) return true;
+
+  const currentWindow = Math.floor(Date.now() / (windowSec * 1000));
+  const redisKey = `ratelimit:${key}:${currentWindow}`;
+
+  const requests = await client.incr(redisKey);
+  if (requests === 1) {
+    await client.expire(redisKey, windowSec * 2);
+  }
+
+  return requests <= limit;
+}
+
 export class TomTomConfigurationError extends Error {
   constructor(message: string) {
     super(message);
@@ -83,6 +114,16 @@ function buildCacheKey({
 }
 
 async function waitForTomTomSlot() {
+  if (redisUrl) {
+    const success = await checkRateLimit("tomtom-global-limit", 5, 1);
+    if (!success) {
+      const error: any = new Error("TomTom global rate limit exceeded");
+      error.status = 429;
+      throw error;
+    }
+    return;
+  }
+
   const previous = tomTomQueue;
   let release!: () => void;
   tomTomQueue = new Promise<void>((resolve) => {
@@ -114,10 +155,8 @@ function normalizeSearchResult(result: any): TomTomSearchResult {
     categories: Array.isArray(result?.poi?.categories)
       ? result.poi.categories
       : [],
-    lat:
-      typeof result?.position?.lat === "number" ? result.position.lat : null,
-    lon:
-      typeof result?.position?.lon === "number" ? result.position.lon : null,
+    lat: typeof result?.position?.lat === "number" ? result.position.lat : null,
+    lon: typeof result?.position?.lon === "number" ? result.position.lon : null,
     score: typeof result?.score === "number" ? result.score : null,
   };
 }
@@ -127,15 +166,8 @@ function normalizeForMatch(value: string) {
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .replace(/\s+/g, " ")
+    .replace(/[^a-z0-9]+/g, "")
     .trim();
-}
-
-function getMeaningfulTokens(value: string) {
-  return normalizeForMatch(value)
-    .split(" ")
-    .filter((token) => token.length >= 3);
 }
 
 function hasStrongNameMatch(expectedName: string, actualName: string) {
@@ -146,27 +178,16 @@ function hasStrongNameMatch(expectedName: string, actualName: string) {
     return false;
   }
 
-  if (
-    normalizedExpected === normalizedActual ||
+  return (
     normalizedExpected.includes(normalizedActual) ||
     normalizedActual.includes(normalizedExpected)
-  ) {
-    return true;
-  }
-
-  const expectedTokens = getMeaningfulTokens(expectedName);
-  if (expectedTokens.length === 0) {
-    return false;
-  }
-
-  const matchedTokens = expectedTokens.filter((token) =>
-    normalizedActual.includes(token),
   );
-
-  return matchedTokens.length >= Math.max(1, Math.ceil(expectedTokens.length * 0.6));
 }
 
-function hasLocationHintMatch(locationHint: string, result: TomTomSearchResult) {
+function hasLocationHintMatch(
+  locationHint: string,
+  result: TomTomSearchResult,
+) {
   if (!locationHint.trim()) {
     return true;
   }
@@ -176,17 +197,13 @@ function hasLocationHintMatch(locationHint: string, result: TomTomSearchResult) 
       .filter(Boolean)
       .join(" "),
   );
-  const locationTokens = getMeaningfulTokens(locationHint);
+  const hint = normalizeForMatch(locationHint);
 
-  if (!locationContext || locationTokens.length === 0) {
+  if (!locationContext || !hint) {
     return false;
   }
 
-  const matchedTokens = locationTokens.filter((token) =>
-    locationContext.includes(token),
-  );
-
-  return matchedTokens.length >= Math.max(1, Math.ceil(locationTokens.length * 0.5));
+  return locationContext.includes(hint) || hint.includes(locationContext);
 }
 
 export function isTomTomResultMatch({
