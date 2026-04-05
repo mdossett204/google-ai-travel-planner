@@ -1,40 +1,44 @@
-import { isTomTomResultMatch, searchTomTom } from "../utils/tomtomSearch.js";
-import type Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
+import { isTomTomResultMatch, searchTomTom } from "./tomtomSearch.js";
 
-export interface AnthropicToolExecutionContext {
+export interface OpenAIToolExecutionContext {
   name: string;
   args: any;
 }
 
-export function getAnthropicVerificationTools(): Anthropic.Tool[] {
+export function getOpenAIVerificationTools(): OpenAI.Chat.ChatCompletionTool[] {
   return [
     {
-      name: "search_place",
-      description:
-        "Verify a hotel, restaurant, attraction, or business by searching for its official place details before including it in the final answer.",
-      input_schema: {
-        type: "object",
-        properties: {
-          name: {
-            type: "string",
-            description: "The exact or best-known name of the place to verify.",
+      type: "function",
+      function: {
+        name: "search_place",
+        description:
+          "Verify a hotel, restaurant, attraction, or business by searching for its official place details before including it in the final answer.",
+        parameters: {
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+              description:
+                "The exact or best-known name of the place to verify.",
+            },
+            locationHint: {
+              type: "string",
+              description:
+                "City, region, or destination hint to narrow the search. Use an empty string if unknown.",
+            },
           },
-          locationHint: {
-            type: "string",
-            description:
-              "City, region, or destination hint to narrow the search. Use an empty string if unknown.",
-          },
-        },
-        required: ["name"],
+          required: ["name", "locationHint"],
+        } as any,
       },
     },
   ];
 }
 
-export async function executeAnthropicTool({
+export async function executeOpenAITool({
   name,
   args,
-}: AnthropicToolExecutionContext): Promise<any> {
+}: OpenAIToolExecutionContext): Promise<any> {
   if (name === "search_place") {
     const placeName = typeof args.name === "string" ? args.name.trim() : "";
     const locationHint =
@@ -60,7 +64,7 @@ export async function executeAnthropicTool({
     });
 
     if (process.env.DEBUG_LLM_ROUTER === "true") {
-      console.warn("[anthropicTools] search_place-result", {
+      console.warn("[openaiTools] search_place-result", {
         query,
         isMatch,
         result,

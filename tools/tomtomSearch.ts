@@ -1,4 +1,4 @@
-import { getRedisClient, runFixedWindowRateLimit } from "./redis.js";
+import { getRedisClient, runFixedWindowRateLimit } from "../utils/redis.js";
 
 export interface TomTomSearchOptions {
   query: string;
@@ -183,10 +183,7 @@ export async function searchTomTom({
   try {
     const redisCached = await redis.get(`tomtom:cache:${cacheKey}`);
     if (redisCached) {
-      const cachedJson =
-        typeof redisCached === "string"
-          ? redisCached
-          : redisCached.toString("utf8");
+      const cachedJson = String(redisCached);
       const parsedResults = JSON.parse(cachedJson) as TomTomSearchResult[];
       if (isDebugEnabled()) {
         console.warn("[tomtomSearch] global-redis-cache-hit", {

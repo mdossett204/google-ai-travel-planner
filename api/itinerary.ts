@@ -4,20 +4,20 @@ import {
   generateText,
   generateTextWithMeta,
   type LlmProvider,
-} from "./utils/llmRouter.js";
-import { validateItineraryRequest } from "./utils/requestValidation.js";
-import { readJsonBody } from "./utils/http.js";
-import { getAnthropicVerificationTools } from "./tools/anthropicTools.js";
-import { getGeminiVerificationTools } from "./tools/geminiTools.js";
-import { getOpenAIVerificationTools } from "./tools/openaiTools.js";
-import { assertTomTomApiKeyConfigured } from "./utils/tomtomSearch.js";
-import { assertRedisConfigured, getRedisClient } from "./utils/redis.js";
-import { formatFoodPreferences } from "./utils/foodPreferences.js";
-import { formatLodgingPreferences } from "./utils/lodgingPreferences.js";
+} from "../utils/llmRouter.js";
+import { validateItineraryRequest } from "../utils/requestValidation.js";
+import { readJsonBody } from "../utils/http.js";
+import { getAnthropicVerificationTools } from "../tools/anthropicTools.js";
+import { getGeminiVerificationTools } from "../tools/geminiTools.js";
+import { getOpenAIVerificationTools } from "../tools/openaiTools.js";
+import { assertTomTomApiKeyConfigured } from "../tools/tomtomSearch.js";
+import { assertRedisConfigured, getRedisClient } from "../utils/redis.js";
+import { formatFoodPreferences } from "../utils/foodPreferences.js";
+import { formatLodgingPreferences } from "../utils/lodgingPreferences.js";
 import {
   formatPreferredLocation,
   formatTravelerType,
-} from "./utils/tripContext.js";
+} from "../utils/tripContext.js";
 
 function sendJson(res: any, status: number, data: any) {
   res.statusCode = status;
@@ -121,8 +121,13 @@ export default async function handler(req: any, res: any) {
     }
 
     const durationValue = data.durationValue;
+    const verificationConfig = getItineraryVerificationConfig();
 
-    const cachePayload = { version: 2, data, recommendation };
+    const cachePayload = {
+      version: 2,
+      data,
+      recommendation,
+    };
     const cacheKey =
       "itinerary:" +
       crypto
@@ -384,7 +389,6 @@ export default async function handler(req: any, res: any) {
     - Book timed-entry attractions early during peak periods.
   `;
 
-    const verificationConfig = getItineraryVerificationConfig();
     const verificationResult = await generateTextWithMeta({
       provider: verificationConfig.provider,
       model: verificationConfig.model,

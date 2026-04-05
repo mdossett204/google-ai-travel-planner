@@ -1,4 +1,4 @@
-import { isTomTomResultMatch, searchTomTom } from "../utils/tomtomSearch.js";
+import { isTomTomResultMatch, searchTomTom } from "./tomtomSearch.js";
 
 export interface GeminiToolDefinition {
   functionDeclarations: Array<{

@@ -1,17 +1,17 @@
 import crypto from "crypto";
-import { assertProviderApiKeysConfigured, generateText } from "./utils/llmRouter.js";
+import { assertProviderApiKeysConfigured, generateText } from "../utils/llmRouter.js";
 import {
   validateRecommendationsResponse,
   validateTravelFormData,
-} from "./utils/requestValidation.js";
-import { readJsonBody } from "./utils/http.js";
-import { assertRedisConfigured, getRedisClient } from "./utils/redis.js";
-import { formatFoodPreferences } from "./utils/foodPreferences.js";
-import { formatLodgingPreferences } from "./utils/lodgingPreferences.js";
+} from "../utils/requestValidation.js";
+import { readJsonBody } from "../utils/http.js";
+import { assertRedisConfigured, getRedisClient } from "../utils/redis.js";
+import { formatFoodPreferences } from "../utils/foodPreferences.js";
+import { formatLodgingPreferences } from "../utils/lodgingPreferences.js";
 import {
   formatPreferredLocation,
   formatTravelerType,
-} from "./utils/tripContext.js";
+} from "../utils/tripContext.js";
 
 function sendJson(res: any, status: number, data: any) {
   res.statusCode = status;
@@ -82,8 +82,7 @@ export default async function handler(req: any, res: any) {
     try {
       const cached = await redis.get(cacheKey);
       if (cached) {
-        const cachedJson =
-          typeof cached === "string" ? cached : cached.toString("utf8");
+        const cachedJson = String(cached);
         return sendJson(
           res,
           200,

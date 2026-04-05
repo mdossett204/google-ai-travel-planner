@@ -1,7 +1,7 @@
-import { assertTomTomApiKeyConfigured, searchTomTom } from "./utils/tomtomSearch.js";
-import { readJsonBody } from "./utils/http.js";
-import { validateTomTomPoiSearchRequest } from "./utils/requestValidation.js";
-import { assertRedisConfigured } from "./utils/redis.js";
+import { assertTomTomApiKeyConfigured, searchTomTom } from "./tomtomSearch.js";
+import { readJsonBody } from "../utils/http.js";
+import { validateTomTomPoiSearchRequest } from "../utils/requestValidation.js";
+import { assertRedisConfigured } from "../utils/redis.js";
 
 function sendJson(res: any, status: number, data: any) {
   res.statusCode = status;
