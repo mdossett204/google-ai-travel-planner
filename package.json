@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
+    "dev:frontend": "vite --port=3000 --host=0.0.0.0",
+    "dev:vercel": "vercel dev",
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",
@@ -35,7 +37,7 @@
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
-    "vercel": "^50.38.3",
+    "vercel": "^53.0.1",
     "vite": "^6.2.0"
   }
 }

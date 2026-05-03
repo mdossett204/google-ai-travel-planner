@@ -124,7 +124,7 @@ export default async function handler(req: any, res: any) {
     const verificationConfig = getItineraryVerificationConfig();
 
     const cachePayload = {
-      version: 2,
+      version: 3,
       data,
       recommendation,
     };

@@ -45,6 +45,23 @@ export interface Recommendation {
   bestTimeToGo: string;
 }
 
+async function getApiErrorMessage(
+  res: Response,
+  fallbackMessage: string,
+): Promise<string> {
+  const err = await res.json().catch(() => ({} as { error?: string }));
+
+  if (typeof err.error === "string" && err.error.trim()) {
+    return err.error;
+  }
+
+  if (res.status === 404) {
+    return "API route not found. Start the full app with `npm run dev:vercel` or `npx vercel dev`. `npm run dev` and `npm run dev:frontend` serve only the Vite client, so `/api/*` requests return 404.";
+  }
+
+  return fallbackMessage;
+}
+
 export async function getRecommendations(
   data: TravelFormData,
 ): Promise<Recommendation[]> {
@@ -60,8 +77,9 @@ export async function getRecommendations(
   });
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || "Failed to fetch recommendations.");
+    throw new Error(
+      await getApiErrorMessage(res, "Failed to fetch recommendations."),
+    );
   }
 
   return (await res.json()) as Recommendation[];
@@ -78,8 +96,7 @@ export async function getItinerary(
   });
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || "Failed to fetch itinerary.");
+    throw new Error(await getApiErrorMessage(res, "Failed to fetch itinerary."));
   }
 
   const payload = (await res.json()) as { itinerary: string };

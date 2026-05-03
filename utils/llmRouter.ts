@@ -23,6 +23,7 @@ const MAX_TOOL_CALLS = 10;
 const MAX_TOOL_ITERATIONS = 4;
 const LLM_MAX_RETRIES = 3;
 const LLM_RETRY_BASE_DELAY_MS = 1500;
+const DEFAULT_ANTHROPIC_MAX_TOKENS = 8192;
 const GEMINI_MIN_INTERVAL_MS = 6000;
 const GLOBAL_LLM_RATE_LIMIT_KEY = "llm-call-global-limit";
 const GLOBAL_LLM_RATE_LIMIT = 15;
@@ -156,6 +157,13 @@ function getProviderApiKeyEnvVar(provider: LlmProvider) {
     case "gemini":
       return "GEMINI_API_KEY";
   }
+}
+
+function getAnthropicMaxTokens() {
+  const raw = process.env.ANTHROPIC_MAX_TOKENS;
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  return DEFAULT_ANTHROPIC_MAX_TOKENS;
 }
 
 export function assertProviderApiKeyConfigured(provider: LlmProvider) {
@@ -298,7 +306,7 @@ async function finalizeAnthropicWithoutTools({
       await waitForLlmRequestSlot("anthropic");
       return anthropic.messages.create({
         model,
-        max_tokens: 2048,
+        max_tokens: getAnthropicMaxTokens(),
         messages: finalMessages as any,
       });
     },
@@ -555,7 +563,7 @@ export async function generateTextWithMeta(
           await waitForLlmRequestSlot("anthropic");
           return anthropic.messages.create({
             model: resolvedModel,
-            max_tokens: 2048,
+            max_tokens: getAnthropicMaxTokens(),
             messages: [{ role: "user", content: systemPrefix + opts.prompt }],
           });
         },
@@ -576,7 +584,7 @@ export async function generateTextWithMeta(
             await waitForLlmRequestSlot("anthropic");
             return anthropic.messages.create({
               model: resolvedModel,
-              max_tokens: 2048,
+              max_tokens: getAnthropicMaxTokens(),
               tools: anthropicTools,
               messages,
             });
