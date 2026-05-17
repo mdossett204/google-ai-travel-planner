@@ -55,10 +55,12 @@ export default async function handler(req: any, res: any) {
     assertRedisConfigured();
 
     const data = validateTravelFormData(await readJsonBody(req));
-    const foodPreferences = formatFoodPreferences(data.foodPreferences || {});
-    const lodgingPreferences = formatLodgingPreferences(
-      data.lodgingPreferences || {},
-    );
+    const foodPreferences = data.includeFood
+      ? formatFoodPreferences(data.foodPreferences || {})
+      : "";
+    const lodgingPreferences = data.includeLodging
+      ? formatLodgingPreferences(data.lodgingPreferences || {})
+      : "";
     const travelerType = formatTravelerType(data.travelers);
     const preferredLocation = formatPreferredLocation(
       data.preferredLocation || {},
@@ -71,6 +73,17 @@ export default async function handler(req: any, res: any) {
         : "Not specified. Recommend the best realistic time to visit.";
 
     const durationValue = data.durationValue;
+    const locationRules = [
+      "- You MUST stay strictly inside the requested country.",
+      data.preferredLocation?.stateOrProvince?.trim()
+        ? "- If a state/province is provided, stay inside that state/province."
+        : null,
+      data.preferredLocation?.city?.trim()
+        ? "- If a city is provided, stay inside that city."
+        : null,
+    ]
+      .filter(Boolean)
+      .join("\n    ");
 
     const cacheKey =
       "recs:" +
@@ -101,21 +114,19 @@ export default async function handler(req: any, res: any) {
     Duration: ${durationValue} ${sanitize(data.durationUnit)}
     Travel Style: ${travelerType}
     Budget (Treat as upper limit, with +/- 20% flexibility only when clearly justified):
-      - Lodging: $${data.budget?.lodging || "Any"} per night
+      - Lodging: ${data.includeLodging ? `$${data.budget?.lodging || "Any"} per night` : "Not requested (ignore lodging)"}
       - Local Transportation at Destination: $${data.budget?.localTransportation || "Any"} total
-      - Food: $${data.budget?.food || "Any"} per day
+      - Food: ${data.includeFood ? `$${data.budget?.food || "Any"} per day` : "Not requested (ignore food)"}
       - Miscellaneous/Activities: $${data.budget?.misc || "Any"} total
     Primary Goal(s): <goals>${data.primaryGoal?.length > 0 ? sanitize(data.primaryGoal.join(", ")) : "Any"}</goals>
-    FOOD PREFERENCES
-    ${foodPreferences}
-    LODGING PREFERENCES
-    ${lodgingPreferences}
+    ${data.includeFood ? `FOOD PREFERENCES\n    ${foodPreferences}` : "FOOD: Not requested"}
+    ${data.includeLodging ? `\n    LODGING PREFERENCES\n    ${lodgingPreferences}` : "\n    LODGING: Not requested"}
     Local Transportation Preferences: ${data.localTransportation?.length > 0 ? data.localTransportation.join(", ") : "Any"}
     Preferred Location: ${preferredLocation}
     Attractions of Interest: <attractions>${sanitize(data.attractionInterests) || "None specified"}</attractions>
 
     DECISION RULES
-    - You MUST stay strictly inside the requested country and state/province. If a city is provided, stay inside that city as well.
+    ${locationRules}
     - Do NOT use web search in this stage. Use general knowledge about the area, travel patterns, seasonality, and destination fit.
     - Interpret duration primarily as trip days. Unless the input clearly means something else, assume approximate nights = max(days - 1, 0).
     - If fewer than 3 materially different destinations are possible within the requested location, return 3 variants within that same destination and make the differences explicit.
@@ -210,8 +221,6 @@ export default async function handler(req: any, res: any) {
     let parsed = null;
     for (let attempt = 0; attempt < 2; attempt++) {
       const text = await generateText({
-        provider: "gemini",
-        model: "gemini-2.5-flash",
         prompt,
         systemInstruction:
           "You are an elite travel concierge. At this stage, your job is to recommend destination concepts, not verified bookings. Use general destination knowledge and avoid web search in this stage. Do not include hotels, restaurants, exact addresses, opening hours, or official websites. Food preferences should usually be treated as a downstream itinerary constraint unless food is a primary travel goal. Provide factual, realistic recommendations grounded in the user's budget and travel goals.",

@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react';
 import { Recommendation } from '../services/geminiService';
 import { CheckCircle2, ArrowRight, Wallet, Calendar } from 'lucide-react';
 
@@ -5,6 +6,61 @@ interface RecommendationsProps {
   recommendations: Recommendation[];
   onSelect: (rec: Recommendation) => void;
   onBack: () => void;
+}
+
+function buildSvgPlaceholder(title: string) {
+  const safeTitle = (title || 'Trip').slice(0, 40);
+  const encoded = encodeURIComponent(`<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#10b981"/>
+      <stop offset="1" stop-color="#0f172a"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="600" fill="url(#g)"/>
+  <rect y="380" width="800" height="220" fill="rgba(0,0,0,0.35)"/>
+  <text x="40" y="455" fill="#ffffff" font-family="system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif" font-size="44" font-weight="700">
+    ${safeTitle}
+  </text>
+  <text x="40" y="515" fill="rgba(255,255,255,0.85)" font-family="system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif" font-size="24">
+    Image unavailable — showing placeholder
+  </text>
+</svg>`);
+  return `data:image/svg+xml;charset=utf-8,${encoded}`;
+}
+
+function RecommendationImage({ title }: { title: string }) {
+  const primarySrc = useMemo(
+    () =>
+      `https://picsum.photos/seed/${encodeURIComponent(title)}/800/600`,
+    [title],
+  );
+  const fallbackSrc = useMemo(() => buildSvgPlaceholder(title), [title]);
+  const [src, setSrc] = useState(primarySrc);
+  const [isLoaded, setIsLoaded] = useState(false);
+
+  return (
+    <>
+      <img
+        src={src}
+        alt={title}
+        referrerPolicy="no-referrer"
+        loading="eager"
+        decoding="async"
+        onLoad={() => setIsLoaded(true)}
+        onError={() => {
+          if (src !== fallbackSrc) setSrc(fallbackSrc);
+        }}
+        className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ${
+          isLoaded ? 'opacity-100' : 'opacity-0'
+        }`}
+      />
+      {!isLoaded ? (
+        <div className="absolute inset-0 bg-slate-200 animate-pulse" />
+      ) : null}
+    </>
+  );
 }
 
 export default function Recommendations({ recommendations, onSelect, onBack }: RecommendationsProps) {
@@ -33,12 +89,7 @@ export default function Recommendations({ recommendations, onSelect, onBack }: R
             aria-label={`View itinerary for ${rec.title}`}
           >
             <div className="h-48 bg-slate-100 relative overflow-hidden">
-              <img
-                src={`https://picsum.photos/seed/${encodeURIComponent(rec.title)}/800/600?blur=2`}
-                alt={rec.title}
-                referrerPolicy="no-referrer"
-                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-              />
+              <RecommendationImage title={rec.title} />
               <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
               <div className="absolute bottom-4 left-4 right-4">
                 <h3 className="text-xl font-bold text-white leading-tight">{rec.title}</h3>
