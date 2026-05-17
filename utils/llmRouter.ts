@@ -383,6 +383,7 @@ type GenerateTextOptions = {
   geminiTools?: GeminiToolDefinition[];
   openaiTools?: OpenAI.Chat.ChatCompletionTool[];
   anthropicTools?: Anthropic.Tool[];
+  maxToolCalls?: number;
 };
 
 export async function generateText(opts: GenerateTextOptions): Promise<string> {
@@ -390,16 +391,46 @@ export async function generateText(opts: GenerateTextOptions): Promise<string> {
   return result.text;
 }
 
+export type ToolBudgetInputs = {
+  durationDays: number;
+  activityLevel: "Relaxed" | "Balanced" | "Very Active" | "";
+  includeLodging: boolean;
+  includeFood: boolean;
+  isFoodMajorTripFocus: boolean;
+};
+
+export function calculateMaxToolCallsForTrip(inputs: ToolBudgetInputs): number {
+  const onLocationDays = Math.max(inputs.durationDays - 2, 0);
+  const dailyLocations =
+    inputs.activityLevel === "Very Active"
+      ? 4
+      : inputs.activityLevel === "Relaxed"
+        ? 2
+        : 3; // Balanced/default
+
+  const base = onLocationDays * dailyLocations;
+  const lodging = inputs.includeLodging ? 3 : 0;
+  const food =
+    inputs.includeFood && inputs.isFoodMajorTripFocus ? 3 * inputs.durationDays : 0;
+
+  const raw = (base + lodging + food) * 1.5;
+  return Math.max(0, Math.ceil(raw));
+}
+
 export async function generateTextWithMeta(
   opts: GenerateTextOptions,
 ): Promise<GenerateTextResult> {
   const provider = getProvider(opts.provider) || "gemini";
   assertProviderApiKeyConfigured(provider);
-  const model = opts.model?.trim() || "gemini-2.5-flash";
+  const model = opts.model?.trim() || "";
   const isDebug = process.env.DEBUG_LLM_ROUTER === "true";
   let text = "";
   let usedFallback = false;
   let resolvedModel = model;
+  const maxToolCalls =
+    typeof opts.maxToolCalls === "number" && Number.isFinite(opts.maxToolCalls)
+      ? Math.max(0, Math.floor(opts.maxToolCalls))
+      : MAX_TOOL_CALLS;
 
   // if (isDebug) {
   //   console.warn("[llmRouter] request", {
@@ -413,7 +444,7 @@ export async function generateTextWithMeta(
 
   if (provider === "openai") {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    resolvedModel = model || "gpt-5-nano";
+    resolvedModel = model || "gpt-5-mini";
     const hasOpenAITools = (opts.openaiTools?.length || 0) > 0;
     const openaiTools = opts.openaiTools ?? [];
 
@@ -481,12 +512,12 @@ export async function generateTextWithMeta(
             toolNames: toolCalls.map((call) => call.function.name),
           });
         }
-        if (nextTotalToolCalls > MAX_TOOL_CALLS) {
+        if (nextTotalToolCalls > maxToolCalls) {
           if (isDebug) {
             console.warn("[llmRouter] openai-tool-call-limit-hit", {
               iteration: attempt + 1,
               totalToolCalls: nextTotalToolCalls,
-              maxToolCalls: MAX_TOOL_CALLS,
+              maxToolCalls,
             });
           }
           usedFallback = true;
@@ -495,7 +526,7 @@ export async function generateTextWithMeta(
             model: resolvedModel,
             messages,
             providerLabel: "OpenAI",
-            maxToolCalls: MAX_TOOL_CALLS,
+            maxToolCalls,
             isDebug,
           });
           break;
@@ -616,12 +647,12 @@ export async function generateTextWithMeta(
             toolNames: toolUses.map((item) => item.name),
           });
         }
-        if (totalToolCalls > MAX_TOOL_CALLS) {
+        if (totalToolCalls > maxToolCalls) {
           if (isDebug) {
             console.warn("[llmRouter] anthropic-tool-call-limit-hit", {
               iteration: attempt + 1,
               totalToolCalls,
-              maxToolCalls: MAX_TOOL_CALLS,
+              maxToolCalls,
             });
           }
           usedFallback = true;
@@ -630,7 +661,7 @@ export async function generateTextWithMeta(
             model: resolvedModel,
             messages,
             providerLabel: "Anthropic",
-            maxToolCalls: MAX_TOOL_CALLS,
+            maxToolCalls,
             reason: "tool-limit-hit",
             isDebug,
           });
@@ -772,12 +803,12 @@ export async function generateTextWithMeta(
               .filter(Boolean),
           });
         }
-        if (totalToolCalls > MAX_TOOL_CALLS) {
+        if (totalToolCalls > maxToolCalls) {
           if (isDebug && hasGeminiFunctionTools) {
             console.warn("[llmRouter] gemini-tool-call-limit-hit", {
               iteration: attempt + 1,
               totalToolCalls,
-              maxToolCalls: MAX_TOOL_CALLS,
+              maxToolCalls,
             });
           }
           usedFallback = true;
@@ -787,7 +818,7 @@ export async function generateTextWithMeta(
             contents,
             systemInstruction: opts.systemInstruction,
             providerLabel: "Gemini",
-            maxToolCalls: MAX_TOOL_CALLS,
+            maxToolCalls,
             isDebug,
           });
           break;

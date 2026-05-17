@@ -10,6 +10,9 @@ export interface ValidatedTravelFormData {
   durationValue: number;
   durationUnit: "days" | "weeks";
   travelers: "Solo" | "Couple" | "Family" | "Friends";
+  includeLodging: boolean;
+  includeFood: boolean;
+  activityLevel: "Relaxed" | "Balanced" | "Very Active" | "";
   budget: {
     lodging: string;
     localTransportation: string;
@@ -21,7 +24,8 @@ export interface ValidatedTravelFormData {
     dietaryRestrictions: string[];
     cuisineInterests: string[];
     diningStyle: string[];
-    foodPriority: "Not Important" | "Nice to Have" | "Major Trip Focus";
+    foodPlaceTypes: string[];
+    foodPriority: "Not Important" | "Nice to Have" | "Major Trip Focus" | "";
   };
   lodgingPreferences: {
     lodgingTypes: string[];
@@ -98,6 +102,23 @@ function parseStringArray(value: unknown, fieldName: string) {
   return value;
 }
 
+function parseOptionalStringArray(value: unknown, fieldName: string) {
+  if (typeof value === "undefined") return [];
+  return parseStringArray(value, fieldName);
+}
+
+function parseOptionalBoolean(
+  value: unknown,
+  fieldName: string,
+  defaultValue: boolean,
+) {
+  if (typeof value === "undefined") return defaultValue;
+  if (typeof value !== "boolean") {
+    throw new RequestValidationError(`${fieldName} must be a boolean.`);
+  }
+  return value;
+}
+
 function parseStringEnum<T extends string>(
   value: unknown,
   fieldName: string,
@@ -135,18 +156,30 @@ function parseOptionalNumber(value: unknown, fieldName: string) {
 export function validateTravelFormData(raw: unknown): ValidatedTravelFormData {
   const input = requireRecord(raw, "Request body");
   const budget = requireRecord(input.budget, "budget");
-  const foodPreferences = requireRecord(
-    input.foodPreferences,
-    "foodPreferences",
-  );
-  const lodgingPreferences = requireRecord(
-    input.lodgingPreferences,
-    "lodgingPreferences",
-  );
   const preferredLocation = requireRecord(
     input.preferredLocation,
     "preferredLocation",
   );
+
+  // Default to true for backwards compatibility with older clients.
+  const includeFood = parseOptionalBoolean(input.includeFood, "includeFood", true);
+  const includeLodging = parseOptionalBoolean(
+    input.includeLodging,
+    "includeLodging",
+    true,
+  );
+
+  const foodPreferences = includeFood
+    ? requireRecord(input.foodPreferences, "foodPreferences")
+    : isRecord(input.foodPreferences)
+      ? input.foodPreferences
+      : {};
+
+  const lodgingPreferences = includeLodging
+    ? requireRecord(input.lodgingPreferences, "lodgingPreferences")
+    : isRecord(input.lodgingPreferences)
+      ? input.lodgingPreferences
+      : {};
 
   return {
     timeOfYear: parseStringArray(input.timeOfYear, "timeOfYear"),
@@ -161,37 +194,61 @@ export function validateTravelFormData(raw: unknown): ValidatedTravelFormData {
       "Family",
       "Friends",
     ]),
+    includeFood,
+    includeLodging,
+    activityLevel:
+      typeof input.activityLevel === "undefined"
+        ? ""
+        : parseStringEnum(input.activityLevel, "activityLevel", [
+            "Relaxed",
+            "Balanced",
+            "Very Active",
+            "",
+          ]),
     budget: {
-      lodging: parseString(budget.lodging, "budget.lodging"),
-      localTransportation: parseString(
+      lodging: parseOptionalString(budget.lodging, "budget.lodging"),
+      localTransportation: parseOptionalString(
         budget.localTransportation,
         "budget.localTransportation",
       ),
-      food: parseString(budget.food, "budget.food"),
-      misc: parseString(budget.misc, "budget.misc"),
+      food: parseOptionalString(budget.food, "budget.food"),
+      misc: parseOptionalString(budget.misc, "budget.misc"),
     },
     primaryGoal: parseStringArray(input.primaryGoal, "primaryGoal"),
     foodPreferences: {
-      dietaryRestrictions: parseStringArray(
+      dietaryRestrictions: parseOptionalStringArray(
         foodPreferences.dietaryRestrictions,
         "foodPreferences.dietaryRestrictions",
       ),
-      cuisineInterests: parseStringArray(
+      cuisineInterests: parseOptionalStringArray(
         foodPreferences.cuisineInterests,
         "foodPreferences.cuisineInterests",
       ),
-      diningStyle: parseStringArray(
+      diningStyle: parseOptionalStringArray(
         foodPreferences.diningStyle,
         "foodPreferences.diningStyle",
       ),
-      foodPriority: parseStringEnum(
-        foodPreferences.foodPriority,
-        "foodPreferences.foodPriority",
-        ["Not Important", "Nice to Have", "Major Trip Focus"],
+      foodPlaceTypes: parseOptionalStringArray(
+        foodPreferences.foodPlaceTypes,
+        "foodPreferences.foodPlaceTypes",
       ),
+      foodPriority: includeFood
+        ? parseStringEnum(
+            foodPreferences.foodPriority,
+            "foodPreferences.foodPriority",
+            ["Not Important", "Nice to Have", "Major Trip Focus"],
+          )
+        : typeof foodPreferences.foodPriority === "undefined"
+          ? ""
+          : parseStringEnum(foodPreferences.foodPriority, "foodPreferences.foodPriority", [
+              "Not Important",
+              "Nice to Have",
+              "Major Trip Focus",
+              "",
+            ]),
     },
     lodgingPreferences: {
-      lodgingTypes: parseStringArray(
+      lodgingTypes: parseOptionalStringArray(
         lodgingPreferences.lodgingTypes,
         "lodgingPreferences.lodgingTypes",
       ),
@@ -207,7 +264,7 @@ export function validateTravelFormData(raw: unknown): ValidatedTravelFormData {
       stateOrProvince: parseString(
         preferredLocation.stateOrProvince,
         "preferredLocation.stateOrProvince",
-        { allowEmpty: false },
+        { allowEmpty: true },
       ),
       city: parseOptionalString(preferredLocation.city, "preferredLocation.city"),
     },

@@ -13,6 +13,9 @@ const defaultFormData: TravelFormData = {
   durationValue: "",
   durationUnit: "days",
   travelers: "",
+  includeLodging: false,
+  includeFood: false,
+  activityLevel: "",
   budget: {
     lodging: "",
     localTransportation: "",
@@ -24,6 +27,7 @@ const defaultFormData: TravelFormData = {
     dietaryRestrictions: [],
     cuisineInterests: [],
     diningStyle: [],
+    foodPlaceTypes: [],
     foodPriority: "",
   },
   lodgingPreferences: {
@@ -77,6 +81,41 @@ export default function TravelForm({
   );
   const [showFoodPriorityError, setShowFoodPriorityError] = useState(false);
 
+  const setIncludeFood = (includeFood: boolean) => {
+    setFormData((prev) => ({
+      ...prev,
+      includeFood,
+      budget: {
+        ...prev.budget,
+        food: includeFood ? prev.budget.food : "",
+      },
+      foodPreferences: includeFood
+        ? prev.foodPreferences
+        : {
+            dietaryRestrictions: [],
+            cuisineInterests: [],
+            diningStyle: [],
+            foodPlaceTypes: [],
+            foodPriority: "",
+          },
+    }));
+    if (!includeFood) setShowFoodPriorityError(false);
+  };
+
+  const setIncludeLodging = (includeLodging: boolean) => {
+    setFormData((prev) => ({
+      ...prev,
+      includeLodging,
+      budget: {
+        ...prev.budget,
+        lodging: includeLodging ? prev.budget.lodging : "",
+      },
+      lodgingPreferences: includeLodging
+        ? prev.lodgingPreferences
+        : { lodgingTypes: [] },
+    }));
+  };
+
   const handleChange = (
     e: React.ChangeEvent<HTMLSelectElement | HTMLInputElement>,
   ) => {
@@ -112,13 +151,18 @@ export default function TravelForm({
   };
 
   const handleFoodArrayToggle = (
-    field: "dietaryRestrictions" | "cuisineInterests" | "diningStyle",
+    field:
+      | "dietaryRestrictions"
+      | "cuisineInterests"
+      | "diningStyle"
+      | "foodPlaceTypes",
     value: string,
   ) => {
     const exclusiveOptionByField = {
       dietaryRestrictions: "No Restrictions",
       cuisineInterests: "No Preference",
       diningStyle: "",
+      foodPlaceTypes: "",
     } as const;
 
     setFormData((prev) => {
@@ -191,10 +235,16 @@ export default function TravelForm({
   const goalOptions = [
     "Relaxation",
     "Adventure",
+    "Hiking",
     "Cultural Exploration",
     "Nature & Wildlife",
     "Food & Culinary",
     "Party & Nightlife",
+  ];
+  const activityLevelOptions: Array<"Relaxed" | "Balanced" | "Very Active"> = [
+    "Relaxed",
+    "Balanced",
+    "Very Active",
   ];
   const transportOptions = [
     "Public Transit",
@@ -244,6 +294,11 @@ export default function TravelForm({
     "Scenic Dining",
     "Fine Dining",
   ];
+  const foodPlaceTypeOptions = [
+    "Restaurants",
+    "Cafes/Bakeries",
+    "Grocery Stores",
+  ];
   const foodPriorityOptions: Array<
     "Not Important" | "Nice to Have" | "Major Trip Focus"
   > = ["Not Important", "Nice to Have", "Major Trip Focus"];
@@ -259,7 +314,7 @@ export default function TravelForm({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.foodPreferences.foodPriority) {
+    if (formData.includeFood && !formData.foodPreferences.foodPriority) {
       setShowFoodPriorityError(true);
       return;
     }
@@ -384,32 +439,70 @@ export default function TravelForm({
 
           <div className="space-y-3 md:col-span-2">
             <label className="block text-sm font-medium text-slate-700">
+              Lodging & Food{" "}
+              <span className="text-slate-400 font-normal">(Optional)</span>
+            </label>
+            <p className="text-xs text-slate-500">
+              Enable sections you want the planner to recommend.
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => setIncludeLodging(!formData.includeLodging)}
+                className={`px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${
+                  formData.includeLodging
+                    ? "bg-emerald-100 border-emerald-500 text-emerald-800"
+                    : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
+                }`}
+                aria-pressed={formData.includeLodging}
+              >
+                Lodging
+              </button>
+              <button
+                type="button"
+                onClick={() => setIncludeFood(!formData.includeFood)}
+                className={`px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${
+                  formData.includeFood
+                    ? "bg-emerald-100 border-emerald-500 text-emerald-800"
+                    : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
+                }`}
+                aria-pressed={formData.includeFood}
+              >
+                Food
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-3 md:col-span-2">
+            <label className="block text-sm font-medium text-slate-700">
               Detailed Budget (USD)
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <label className="text-xs text-slate-500">
-                  Lodging (per night)
-                </label>
-                <div className="relative">
-                  <span className="absolute left-3 top-2.5 text-slate-500">
-                    $
-                  </span>
-                  <input
-                    type="number"
-                    min="0"
-                    value={formData.budget.lodging}
-                    onChange={(e) =>
-                      setFormData((p) => ({
-                        ...p,
-                        budget: { ...p.budget, lodging: e.target.value },
-                      }))
-                    }
-                    className="w-full rounded-xl border border-slate-300 bg-white pl-8 pr-4 py-2 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
-                    placeholder="e.g. 150"
-                  />
+              {formData.includeLodging ? (
+                <div className="space-y-1">
+                  <label className="text-xs text-slate-500">
+                    Lodging (per night)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-2.5 text-slate-500">
+                      $
+                    </span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={formData.budget.lodging}
+                      onChange={(e) =>
+                        setFormData((p) => ({
+                          ...p,
+                          budget: { ...p.budget, lodging: e.target.value },
+                        }))
+                      }
+                      className="w-full rounded-xl border border-slate-300 bg-white pl-8 pr-4 py-2 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
+                      placeholder="e.g. 150"
+                    />
+                  </div>
                 </div>
-              </div>
+              ) : null}
               <div className="space-y-1">
                 <label className="text-xs text-slate-500">
                   Local Transportation (total)
@@ -439,27 +532,31 @@ export default function TravelForm({
                   />
                 </div>
               </div>
-              <div className="space-y-1">
-                <label className="text-xs text-slate-500">Food (per day)</label>
-                <div className="relative">
-                  <span className="absolute left-3 top-2.5 text-slate-500">
-                    $
-                  </span>
-                  <input
-                    type="number"
-                    min="0"
-                    value={formData.budget.food}
-                    onChange={(e) =>
-                      setFormData((p) => ({
-                        ...p,
-                        budget: { ...p.budget, food: e.target.value },
-                      }))
-                    }
-                    className="w-full rounded-xl border border-slate-300 bg-white pl-8 pr-4 py-2 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
-                    placeholder="e.g. 100"
-                  />
+              {formData.includeFood ? (
+                <div className="space-y-1">
+                  <label className="text-xs text-slate-500">
+                    Food (per day)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-2.5 text-slate-500">
+                      $
+                    </span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={formData.budget.food}
+                      onChange={(e) =>
+                        setFormData((p) => ({
+                          ...p,
+                          budget: { ...p.budget, food: e.target.value },
+                        }))
+                      }
+                      className="w-full rounded-xl border border-slate-300 bg-white pl-8 pr-4 py-2 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
+                      placeholder="e.g. 100"
+                    />
+                  </div>
                 </div>
-              </div>
+              ) : null}
               <div className="space-y-1">
                 <label className="text-xs text-slate-500">
                   Activities & Misc (total)
@@ -513,6 +610,39 @@ export default function TravelForm({
 
           <div className="space-y-3 md:col-span-2">
             <label className="block text-sm font-medium text-slate-700">
+              Activity Level{" "}
+              <span className="text-slate-400 font-normal">(Choose one)</span>
+            </label>
+            <p className="text-xs text-slate-500">
+              Helps set the pacing: packed days vs plenty of downtime.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {activityLevelOptions.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      activityLevel:
+                        prev.activityLevel === option ? "" : option,
+                    }))
+                  }
+                  className={`px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${
+                    formData.activityLevel === option
+                      ? "bg-emerald-100 border-emerald-500 text-emerald-800"
+                      : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
+                  }`}
+                  aria-pressed={formData.activityLevel === option}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-3 md:col-span-2">
+            <label className="block text-sm font-medium text-slate-700">
               Local Transportation{" "}
               <span className="text-slate-400 font-normal">
                 (Select multiple)
@@ -549,8 +679,8 @@ export default function TravelForm({
               Preferred Location
             </label>
             <p className="text-xs text-slate-500 mb-2">
-              Country and state/province are required. City is optional if you
-              want the planner to choose the best fit within that region.
+              Country is required. State/province and city are optional (useful
+              for multi-state destinations like national parks).
             </p>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <input
@@ -572,8 +702,7 @@ export default function TravelForm({
                     e.target.value,
                   )
                 }
-                required
-                placeholder="State / Province"
+                placeholder="State / Province (optional)"
                 className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
               />
               <input
@@ -607,134 +736,166 @@ export default function TravelForm({
             />
           </div>
 
-          <div className="space-y-4">
-            <label className="block text-sm font-medium text-slate-700">
-              Food Preferences
-            </label>
+          {formData.includeFood ? (
+            <div className="space-y-4">
+              <label className="block text-sm font-medium text-slate-700">
+                Food Preferences
+              </label>
 
-            <div className="space-y-2">
-              <p className="text-xs text-slate-500">Dietary restrictions</p>
-              <div className="flex flex-wrap gap-2">
-                {dietaryRestrictionOptions.map((option) => (
-                  <button
-                    key={option}
-                    type="button"
-                    onClick={() =>
-                      handleFoodArrayToggle("dietaryRestrictions", option)
-                    }
-                    className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${
-                      formData.foodPreferences.dietaryRestrictions.includes(
-                        option,
-                      )
-                        ? "bg-emerald-100 border-emerald-500 text-emerald-800"
-                        : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
-                    }`}
-                  >
-                    {option}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <p className="text-xs text-slate-500">Cuisine interests</p>
-              <div className="flex flex-wrap gap-2">
-                {cuisineInterestOptions.map((option) => (
-                  <button
-                    key={option}
-                    type="button"
-                    onClick={() =>
-                      handleFoodArrayToggle("cuisineInterests", option)
-                    }
-                    className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${
-                      formData.foodPreferences.cuisineInterests.includes(option)
-                        ? "bg-emerald-100 border-emerald-500 text-emerald-800"
-                        : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
-                    }`}
-                  >
-                    {option}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <p className="text-xs text-slate-500">Dining style</p>
-              <div className="flex flex-wrap gap-2">
-                {diningStyleOptions.map((option) => (
-                  <button
-                    key={option}
-                    type="button"
-                    onClick={() => handleFoodArrayToggle("diningStyle", option)}
-                    className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${
-                      formData.foodPreferences.diningStyle.includes(option)
-                        ? "bg-emerald-100 border-emerald-500 text-emerald-800"
-                        : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
-                    }`}
-                  >
-                    {option}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <p className="text-xs text-slate-500">Food importance</p>
-              <div className="flex flex-wrap gap-2">
-                {foodPriorityOptions.map((option) => (
-                  <button
-                    key={option}
-                    type="button"
-                    onClick={() => handleFoodPriorityChange(option)}
-                    className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${
-                      formData.foodPreferences.foodPriority === option
-                        ? "bg-emerald-100 border-emerald-500 text-emerald-800"
-                        : showFoodPriorityError
-                          ? "bg-white border-red-300 text-slate-700 hover:border-red-400"
+              <div className="space-y-2">
+                <p className="text-xs text-slate-500">Food stops</p>
+                <div className="flex flex-wrap gap-2">
+                  {foodPlaceTypeOptions.map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      onClick={() =>
+                        handleFoodArrayToggle("foodPlaceTypes", option)
+                      }
+                      className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${
+                        formData.foodPreferences.foodPlaceTypes.includes(option)
+                          ? "bg-emerald-100 border-emerald-500 text-emerald-800"
                           : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
+                      }`}
+                    >
+                      {option}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-xs text-slate-500">Dietary restrictions</p>
+                <div className="flex flex-wrap gap-2">
+                  {dietaryRestrictionOptions.map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      onClick={() =>
+                        handleFoodArrayToggle("dietaryRestrictions", option)
+                      }
+                      className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${
+                        formData.foodPreferences.dietaryRestrictions.includes(
+                          option,
+                        )
+                          ? "bg-emerald-100 border-emerald-500 text-emerald-800"
+                          : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
+                      }`}
+                    >
+                      {option}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-xs text-slate-500">Cuisine interests</p>
+                <div className="flex flex-wrap gap-2">
+                  {cuisineInterestOptions.map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      onClick={() =>
+                        handleFoodArrayToggle("cuisineInterests", option)
+                      }
+                      className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${
+                        formData.foodPreferences.cuisineInterests.includes(
+                          option,
+                        )
+                          ? "bg-emerald-100 border-emerald-500 text-emerald-800"
+                          : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
+                      }`}
+                    >
+                      {option}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-xs text-slate-500">Dining style</p>
+                <div className="flex flex-wrap gap-2">
+                  {diningStyleOptions.map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      onClick={() =>
+                        handleFoodArrayToggle("diningStyle", option)
+                      }
+                      className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${
+                        formData.foodPreferences.diningStyle.includes(option)
+                          ? "bg-emerald-100 border-emerald-500 text-emerald-800"
+                          : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
+                      }`}
+                    >
+                      {option}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-xs text-slate-500">Food importance</p>
+                <div className="flex flex-wrap gap-2">
+                  {foodPriorityOptions.map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      onClick={() => handleFoodPriorityChange(option)}
+                      className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${
+                        formData.foodPreferences.foodPriority === option
+                          ? "bg-emerald-100 border-emerald-500 text-emerald-800"
+                          : showFoodPriorityError
+                            ? "bg-white border-red-300 text-slate-700 hover:border-red-400"
+                            : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
+                      }`}
+                      aria-pressed={
+                        formData.foodPreferences.foodPriority === option
+                      }
+                    >
+                      {option}
+                    </button>
+                  ))}
+                </div>
+                {showFoodPriorityError ? (
+                  <p className="text-xs text-red-600">
+                    Choose how important food is for this trip.
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          {formData.includeLodging ? (
+            <div className="space-y-3 md:col-span-2">
+              <label className="block text-sm font-medium text-slate-700">
+                Lodging Preferences{" "}
+                <span className="text-slate-400 font-normal">
+                  (Select one or more)
+                </span>
+              </label>
+              <p className="text-xs text-slate-500">
+                Tell us what kinds of places you prefer staying in once you are
+                at the destination.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {lodgingTypeOptions.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => handleLodgingTypeToggle(option)}
+                    className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${
+                      formData.lodgingPreferences.lodgingTypes.includes(option)
+                        ? "bg-emerald-100 border-emerald-500 text-emerald-800"
+                        : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
                     }`}
-                    aria-pressed={formData.foodPreferences.foodPriority === option}
                   >
                     {option}
                   </button>
                 ))}
               </div>
-              {showFoodPriorityError ? (
-                <p className="text-xs text-red-600">
-                  Choose how important food is for this trip.
-                </p>
-              ) : null}
             </div>
-          </div>
-
-          <div className="space-y-3">
-            <label className="block text-sm font-medium text-slate-700">
-              Lodging Preferences{" "}
-              <span className="text-slate-400 font-normal">
-                (Select one or more)
-              </span>
-            </label>
-            <p className="text-xs text-slate-500">
-              Tell us what kinds of places you prefer staying in once you are at
-              the destination.
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {lodgingTypeOptions.map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  onClick={() => handleLodgingTypeToggle(option)}
-                  className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${
-                    formData.lodgingPreferences.lodgingTypes.includes(option)
-                      ? "bg-emerald-100 border-emerald-500 text-emerald-800"
-                      : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
-                  }`}
-                >
-                  {option}
-                </button>
-              ))}
-            </div>
-          </div>
+          ) : null}
         </div>
 
         <div className="pt-6 flex gap-4">

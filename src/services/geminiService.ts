@@ -4,6 +4,7 @@ export interface FoodPreferences {
   dietaryRestrictions: string[];
   cuisineInterests: string[];
   diningStyle: string[];
+  foodPlaceTypes: string[];
   foodPriority: "Not Important" | "Nice to Have" | "Major Trip Focus" | "";
 }
 
@@ -22,6 +23,9 @@ export interface TravelFormData {
   durationValue: number | "";
   durationUnit: "days" | "weeks";
   travelers: "Solo" | "Couple" | "Family" | "Friends" | "";
+  includeLodging: boolean;
+  includeFood: boolean;
+  activityLevel: "Relaxed" | "Balanced" | "Very Active" | "";
   budget: {
     lodging: string;
     localTransportation: string;
