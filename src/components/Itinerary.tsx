@@ -1,7 +1,6 @@
-import { useState } from 'react';
-import Markdown from 'react-markdown';
-import { Recommendation } from '../services/geminiService';
-import { ArrowLeft, Download, RefreshCcw } from 'lucide-react';
+import Markdown from "react-markdown";
+import type { Recommendation } from "../services/geminiService";
+import { ArrowLeft, Download, RefreshCcw } from "lucide-react";
 
 interface ItineraryProps {
   recommendation: Recommendation;
@@ -10,24 +9,28 @@ interface ItineraryProps {
   onRestart: () => void;
 }
 
-export default function Itinerary({ recommendation, itinerary, onBack, onRestart }: ItineraryProps) {
-  const [isDownloading, setIsDownloading] = useState(false);
-
+export default function Itinerary({
+  recommendation,
+  itinerary,
+  onBack,
+  onRestart,
+}: ItineraryProps) {
   const handleDownload = () => {
-    setIsDownloading(true);
-    try {
-      const element = document.createElement("a");
-      const file = new Blob([itinerary], { type: 'text/markdown' });
-      const objectUrl = URL.createObjectURL(file);
-      element.href = objectUrl;
-      element.download = `${recommendation.title.replace(/\s+/g, '_')}_Itinerary.md`;
-      document.body.appendChild(element);
-      element.click();
-      document.body.removeChild(element);
-      URL.revokeObjectURL(objectUrl);
-    } finally {
-      setIsDownloading(false);
-    }
+    const fileName =
+      recommendation.title
+        .trim()
+        .replace(/[^\w.-]+/g, "_")
+        .replace(/^_+|_+$/g, "") || "Travel";
+
+    const element = document.createElement("a");
+    const file = new Blob([itinerary], { type: "text/markdown" });
+    const objectUrl = URL.createObjectURL(file);
+    element.href = objectUrl;
+    element.download = `${fileName}_Itinerary.md`;
+    document.body.appendChild(element);
+    element.click();
+    document.body.removeChild(element);
+    URL.revokeObjectURL(objectUrl);
   };
 
   return (
@@ -41,22 +44,21 @@ export default function Itinerary({ recommendation, itinerary, onBack, onRestart
             <ArrowLeft size={16} />
             <span>Back to Options</span>
           </button>
-          <h2 className="text-3xl font-semibold text-slate-900 tracking-tight">{recommendation.title}</h2>
-          <p className="text-slate-500 mt-2">Your detailed travel plan and tips.</p>
+          <h2 className="text-3xl font-semibold text-slate-900 tracking-tight">
+            {recommendation.title}
+          </h2>
+          <p className="text-slate-500 mt-2">
+            Your detailed travel plan and tips.
+          </p>
         </div>
-        
+
         <div className="flex items-center gap-3">
           <button
             onClick={handleDownload}
-            disabled={isDownloading}
-            className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-xl transition-colors text-sm disabled:opacity-70 disabled:cursor-not-allowed"
+            className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-xl transition-colors text-sm"
           >
-            {isDownloading ? (
-              <div className="w-4 h-4 border-2 border-slate-400 border-t-slate-700 rounded-full animate-spin" />
-            ) : (
-              <Download size={16} />
-            )}
-            <span>{isDownloading ? 'Saving...' : 'Save Plan'}</span>
+            <Download size={16} />
+            <span>Save Plan</span>
           </button>
           <button
             onClick={onRestart}

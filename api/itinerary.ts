@@ -126,7 +126,9 @@ export default async function handler(req: any, res: any) {
     const durationValue = data.durationValue;
     const verificationConfig = getItineraryVerificationConfig();
     const durationDays =
-      data.durationUnit === "weeks" ? Math.round(durationValue * 7) : durationValue;
+      data.durationUnit === "weeks"
+        ? Math.round(durationValue * 7)
+        : durationValue;
     const locationRule = [
       "Keep the full trip strictly inside the requested country.",
       data.preferredLocation?.stateOrProvince?.trim()
@@ -292,10 +294,10 @@ export default async function handler(req: any, res: any) {
 	    Attractions of Interest: <attractions>${sanitize(data.attractionInterests) || "None specified"}</attractions>
 	    Local Transportation Preferences: ${data.localTransportation?.length > 0 ? data.localTransportation.join(", ") : "Any"}
 	    Budget (Treat as upper limit, +/- 20% acceptable):
-	      - Lodging: ${data.includeLodging ? `$${data.budget?.lodging || "Any"} per night` : "Not requested (omit lodging)"}
-	      - Local Transportation: $${data.budget?.localTransportation || "Any"} total
-	      - Food: ${data.includeFood ? `$${data.budget?.food || "Any"} per day` : "Not requested (omit food)"}
-	      - Miscellaneous/Activities: $${data.budget?.misc || "Any"} total
+	      - Lodging: ${data.includeLodging ? `$${data.budget?.lodging ?? "Any"} per night` : "Not requested (omit lodging)"}
+	      - Local Transportation: $${data.budget?.localTransportation ?? "Any"} total
+	      - Food: ${data.includeFood ? `$${data.budget?.food ?? "Any"} per day` : "Not requested (omit food)"}
+	      - Miscellaneous/Activities: $${data.budget?.misc ?? "Any"} total
 	    ${data.includeFood ? `FOOD PREFERENCES\n	    ${foodPreferences}` : "FOOD: Not requested"}
 	    ${data.includeLodging ? `\n	    LODGING PREFERENCES\n	    ${lodgingPreferences}` : "\n	    LODGING: Not requested"}
 
@@ -339,15 +341,15 @@ export default async function handler(req: any, res: any) {
           : "- Lodging is disabled: do NOT include lodging options."
       }
 		    ${
-        data.includeFood
-          ? [
-              "- Restaurant/cafe/grocery choices must be geographically close to the same day's activities or the stay area for that night.",
-              "- Respect dietary restrictions precisely as hard constraints.",
-              "- Treat cuisine interests and dining style as soft preferences that should guide the tone of the recommendations.",
-              "- Let food priority control how strongly food shapes the plan: if food priority is \"Major Trip Focus\", give food suggestions more weight; if it is \"Nice to Have\", balance food with geography; if it is \"Not Important\", prioritize geography and logistics first.",
-            ].join("\n    ")
-          : "\n    - Food is disabled: do NOT include food suggestions."
-      }
+          data.includeFood
+            ? [
+                "- Restaurant/cafe/grocery choices must be geographically close to the same day's activities or the stay area for that night.",
+                "- Respect dietary restrictions precisely as hard constraints.",
+                "- Treat cuisine interests and dining style as soft preferences that should guide the tone of the recommendations.",
+                '- Let food priority control how strongly food shapes the plan: if food priority is "Major Trip Focus", give food suggestions more weight; if it is "Nice to Have", balance food with geography; if it is "Not Important", prioritize geography and logistics first.',
+              ].join("\n    ")
+            : "\n    - Food is disabled: do NOT include food suggestions."
+        }
 		    ${
           data.includeFood
             ? [
@@ -502,8 +504,8 @@ export default async function handler(req: any, res: any) {
 		    - Official website only if returned by the search_place tool
 
 		    ${
-        data.includeFood
-          ? `## 🍽️ Food & Restaurant Recommendations
+          data.includeFood
+            ? `## 🍽️ Food & Restaurant Recommendations
 		    Organize food suggestions by day. For each day, recommend practical nearby options that match the structured food preferences. Include:
 		    - Name
 		    - Cuisine or style
@@ -521,8 +523,8 @@ export default async function handler(req: any, res: any) {
                 "- Prefer grocery/market-style suggestions when they fit budget and logistics.",
               ].join("\n    ")
         }`
-          : ""
-      }
+            : ""
+        }
 
 	    ## 📅 Day-by-Day Itinerary
 	    For each day include morning, afternoon, and evening.

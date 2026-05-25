@@ -14,10 +14,10 @@ export interface ValidatedTravelFormData {
   includeFood: boolean;
   activityLevel: "Relaxed" | "Balanced" | "Very Active" | "";
   budget: {
-    lodging: string;
-    localTransportation: string;
-    food: string;
-    misc: string;
+    lodging?: number;
+    localTransportation?: number;
+    food?: number;
+    misc?: number;
   };
   primaryGoal: string[];
   foodPreferences: {
@@ -95,8 +95,13 @@ function parseOptionalString(value: unknown, fieldName: string) {
 }
 
 function parseStringArray(value: unknown, fieldName: string) {
-  if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
-    throw new RequestValidationError(`${fieldName} must be an array of strings.`);
+  if (
+    !Array.isArray(value) ||
+    !value.every((item) => typeof item === "string")
+  ) {
+    throw new RequestValidationError(
+      `${fieldName} must be an array of strings.`,
+    );
   }
 
   return value;
@@ -142,7 +147,7 @@ function parsePositiveNumber(value: unknown, fieldName: string) {
 }
 
 function parseOptionalNumber(value: unknown, fieldName: string) {
-  if (typeof value === "undefined") {
+  if (typeof value === "undefined" || value === "" || value === null) {
     return undefined;
   }
 
@@ -162,7 +167,11 @@ export function validateTravelFormData(raw: unknown): ValidatedTravelFormData {
   );
 
   // Default to true for backwards compatibility with older clients.
-  const includeFood = parseOptionalBoolean(input.includeFood, "includeFood", true);
+  const includeFood = parseOptionalBoolean(
+    input.includeFood,
+    "includeFood",
+    true,
+  );
   const includeLodging = parseOptionalBoolean(
     input.includeLodging,
     "includeLodging",
@@ -206,13 +215,13 @@ export function validateTravelFormData(raw: unknown): ValidatedTravelFormData {
             "",
           ]),
     budget: {
-      lodging: parseOptionalString(budget.lodging, "budget.lodging"),
-      localTransportation: parseOptionalString(
+      lodging: parseOptionalNumber(budget.lodging, "budget.lodging"),
+      localTransportation: parseOptionalNumber(
         budget.localTransportation,
         "budget.localTransportation",
       ),
-      food: parseOptionalString(budget.food, "budget.food"),
-      misc: parseOptionalString(budget.misc, "budget.misc"),
+      food: parseOptionalNumber(budget.food, "budget.food"),
+      misc: parseOptionalNumber(budget.misc, "budget.misc"),
     },
     primaryGoal: parseStringArray(input.primaryGoal, "primaryGoal"),
     foodPreferences: {
@@ -240,12 +249,11 @@ export function validateTravelFormData(raw: unknown): ValidatedTravelFormData {
           )
         : typeof foodPreferences.foodPriority === "undefined"
           ? ""
-          : parseStringEnum(foodPreferences.foodPriority, "foodPreferences.foodPriority", [
-              "Not Important",
-              "Nice to Have",
-              "Major Trip Focus",
-              "",
-            ]),
+          : parseStringEnum(
+              foodPreferences.foodPriority,
+              "foodPreferences.foodPriority",
+              ["Not Important", "Nice to Have", "Major Trip Focus", ""],
+            ),
     },
     lodgingPreferences: {
       lodgingTypes: parseOptionalStringArray(
@@ -258,15 +266,22 @@ export function validateTravelFormData(raw: unknown): ValidatedTravelFormData {
       "localTransportation",
     ),
     preferredLocation: {
-      country: parseString(preferredLocation.country, "preferredLocation.country", {
-        allowEmpty: false,
-      }),
+      country: parseString(
+        preferredLocation.country,
+        "preferredLocation.country",
+        {
+          allowEmpty: false,
+        },
+      ),
       stateOrProvince: parseString(
         preferredLocation.stateOrProvince,
         "preferredLocation.stateOrProvince",
         { allowEmpty: true },
       ),
-      city: parseOptionalString(preferredLocation.city, "preferredLocation.city"),
+      city: parseOptionalString(
+        preferredLocation.city,
+        "preferredLocation.city",
+      ),
     },
     attractionInterests: parseOptionalString(
       input.attractionInterests,
@@ -280,7 +295,9 @@ export function validateRecommendation(raw: unknown): ValidatedRecommendation {
 
   return {
     id: parseString(input.id, "recommendation.id", { allowEmpty: false }),
-    title: parseString(input.title, "recommendation.title", { allowEmpty: false }),
+    title: parseString(input.title, "recommendation.title", {
+      allowEmpty: false,
+    }),
     description: parseString(input.description, "recommendation.description", {
       allowEmpty: false,
     }),
