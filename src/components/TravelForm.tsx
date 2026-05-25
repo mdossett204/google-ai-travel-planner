@@ -1,5 +1,6 @@
-import React, { useState } from "react";
-import { TravelFormData } from "../services/geminiService";
+import { useState } from "react";
+import type { ChangeEvent, FormEvent } from "react";
+import type { TravelFormData } from "../services/geminiService";
 import { PlaneTakeoff } from "lucide-react";
 
 interface TravelFormProps {
@@ -42,6 +43,14 @@ const defaultFormData: TravelFormData = {
   attractionInterests: "",
 };
 
+const EMPTY_FOOD_PREFERENCES: TravelFormData["foodPreferences"] = {
+  dietaryRestrictions: [],
+  cuisineInterests: [],
+  diningStyle: [],
+  foodPlaceTypes: [],
+  foodPriority: "",
+};
+
 function buildInitialFormData(
   initialData?: TravelFormData | null,
 ): TravelFormData {
@@ -71,6 +80,92 @@ function buildInitialFormData(
   };
 }
 
+const goalOptions = [
+  "Relaxation",
+  "Adventure",
+  "Hiking",
+  "Cultural Exploration",
+  "Nature & Wildlife",
+  "Food & Culinary",
+  "Party & Nightlife",
+];
+const activityLevelOptions: Array<"Relaxed" | "Balanced" | "Very Active"> = [
+  "Relaxed",
+  "Balanced",
+  "Very Active",
+];
+const transportOptions = [
+  "Public Transit",
+  "Rental Car",
+  "Walking/Biking",
+  "Taxis/Rideshare",
+  "Own Car",
+];
+const monthOptions = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+const dietaryRestrictionOptions = [
+  "Vegan",
+  "Vegetarian",
+  "Gluten-Free",
+  "Dairy-Free",
+  "Nut-Free",
+  "Halal",
+  "Kosher",
+  "Paleo",
+  "Carnivore",
+  "No Restrictions",
+];
+const cuisineInterestOptions = [
+  "Seafood",
+  "Regional Specialties",
+  "Ethnic",
+  "Street Food",
+  "Cafe/Bakery",
+  "No Preference",
+];
+const diningStyleOptions = [
+  "Casual",
+  "Quick Meals",
+  "Family-Friendly",
+  "Scenic Dining",
+  "Fine Dining",
+];
+const foodPlaceTypeOptions = [
+  "Restaurants",
+  "Cafes/Bakeries",
+  "Grocery Stores",
+];
+const foodPriorityOptions: Array<
+  "Not Important" | "Nice to Have" | "Major Trip Focus"
+> = ["Not Important", "Nice to Have", "Major Trip Focus"];
+const lodgingTypeOptions = [
+  "Hotel",
+  "Boutique Hotel",
+  "Vacation Rental",
+  "Bed & Breakfast",
+  "Resort",
+  "Hostel",
+];
+
+const exclusiveOptionByField = {
+  dietaryRestrictions: "No Restrictions",
+  cuisineInterests: "No Preference",
+  diningStyle: "",
+  foodPlaceTypes: "",
+} as const;
+
 export default function TravelForm({
   onSubmit,
   isLoading,
@@ -91,13 +186,7 @@ export default function TravelForm({
       },
       foodPreferences: includeFood
         ? prev.foodPreferences
-        : {
-            dietaryRestrictions: [],
-            cuisineInterests: [],
-            diningStyle: [],
-            foodPlaceTypes: [],
-            foodPriority: "",
-          },
+        : EMPTY_FOOD_PREFERENCES,
     }));
     if (!includeFood) setShowFoodPriorityError(false);
   };
@@ -117,7 +206,7 @@ export default function TravelForm({
   };
 
   const handleChange = (
-    e: React.ChangeEvent<HTMLSelectElement | HTMLInputElement>,
+    e: ChangeEvent<HTMLSelectElement | HTMLInputElement>,
   ) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
@@ -131,9 +220,9 @@ export default function TravelForm({
       const current = (prev[field] as string[]) || [];
       if (current.includes(value)) {
         return { ...prev, [field]: current.filter((v) => v !== value) };
-      } else {
-        return { ...prev, [field]: [...current, value] };
       }
+
+      return { ...prev, [field]: [...current, value] };
     });
   };
 
@@ -158,13 +247,6 @@ export default function TravelForm({
       | "foodPlaceTypes",
     value: string,
   ) => {
-    const exclusiveOptionByField = {
-      dietaryRestrictions: "No Restrictions",
-      cuisineInterests: "No Preference",
-      diningStyle: "",
-      foodPlaceTypes: "",
-    } as const;
-
     setFormData((prev) => {
       const current = prev.foodPreferences[field] || [];
       const exclusiveOption = exclusiveOptionByField[field];
@@ -202,16 +284,13 @@ export default function TravelForm({
   };
 
   const handleFoodPriorityChange = (
-    value: "Not Important" | "Nice to Have" | "Major Trip Focus" | "",
+    value: "Not Important" | "Nice to Have" | "Major Trip Focus",
   ) => {
     setFormData((prev) => ({
       ...prev,
       foodPreferences: {
         ...prev.foodPreferences,
-        foodPriority:
-          prev.foodPreferences.foodPriority === value && value !== ""
-            ? ""
-            : value,
+        foodPriority: prev.foodPreferences.foodPriority === value ? "" : value,
       },
     }));
     setShowFoodPriorityError(false);
@@ -232,86 +311,7 @@ export default function TravelForm({
     });
   };
 
-  const goalOptions = [
-    "Relaxation",
-    "Adventure",
-    "Hiking",
-    "Cultural Exploration",
-    "Nature & Wildlife",
-    "Food & Culinary",
-    "Party & Nightlife",
-  ];
-  const activityLevelOptions: Array<"Relaxed" | "Balanced" | "Very Active"> = [
-    "Relaxed",
-    "Balanced",
-    "Very Active",
-  ];
-  const transportOptions = [
-    "Public Transit",
-    "Rental Car",
-    "Walking/Biking",
-    "Taxis/Rideshare",
-    "Own Car",
-  ];
-  const monthOptions = [
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
-  ];
-  const dietaryRestrictionOptions = [
-    "Vegan",
-    "Vegetarian",
-    "Gluten-Free",
-    "Dairy-Free",
-    "Nut-Free",
-    "Halal",
-    "Kosher",
-    "Paleo",
-    "Carnivore",
-    "No Restrictions",
-  ];
-  const cuisineInterestOptions = [
-    "Seafood",
-    "Regional Specialties",
-    "Ethnic",
-    "Street Food",
-    "Cafe/Bakery",
-    "No Preference",
-  ];
-  const diningStyleOptions = [
-    "Casual",
-    "Quick Meals",
-    "Family-Friendly",
-    "Scenic Dining",
-    "Fine Dining",
-  ];
-  const foodPlaceTypeOptions = [
-    "Restaurants",
-    "Cafes/Bakeries",
-    "Grocery Stores",
-  ];
-  const foodPriorityOptions: Array<
-    "Not Important" | "Nice to Have" | "Major Trip Focus"
-  > = ["Not Important", "Nice to Have", "Major Trip Focus"];
-  const lodgingTypeOptions = [
-    "Hotel",
-    "Boutique Hotel",
-    "Vacation Rental",
-    "Bed & Breakfast",
-    "Resort",
-    "Hostel",
-  ];
-
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
 
     if (formData.includeFood && !formData.foodPreferences.foodPriority) {
@@ -379,7 +379,7 @@ export default function TravelForm({
                   setFormData((p) => ({
                     ...p,
                     durationValue: e.target.value
-                      ? parseInt(e.target.value)
+                      ? parseInt(e.target.value, 10)
                       : "",
                   }))
                 }

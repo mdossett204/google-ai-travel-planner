@@ -3,10 +3,15 @@ import { motion, AnimatePresence } from 'motion/react';
 import TravelForm from './components/TravelForm';
 import Recommendations from './components/Recommendations';
 import Itinerary from './components/Itinerary';
-import { getRecommendations, getItinerary, TravelFormData, Recommendation } from './services/geminiService';
+import { getRecommendations, getItinerary } from './services/geminiService';
+import type { TravelFormData, Recommendation } from './services/geminiService';
 import { Compass } from 'lucide-react';
 
 type AppState = 'input' | 'recommendations' | 'itinerary';
+
+function getErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
+}
 
 export default function App() {
   const [appState, setAppState] = useState<AppState>('input');
@@ -37,9 +42,9 @@ export default function App() {
       } else {
         setError("Couldn't generate recommendations. Please try again.");
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      setError(err.message || "An error occurred while fetching recommendations.");
+      setError(getErrorMessage(err, "An error occurred while fetching recommendations."));
     } finally {
       setIsLoading(false);
     }
@@ -68,9 +73,9 @@ export default function App() {
       } else {
         setError("Couldn't generate the itinerary. Please try again.");
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      setError(err.message || "An error occurred while fetching the itinerary.");
+      setError(getErrorMessage(err, "An error occurred while fetching the itinerary."));
     } finally {
       setIsLoading(false);
     }
@@ -98,10 +103,15 @@ export default function App() {
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-emerald-200 selection:text-emerald-900">
       <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-emerald-600 cursor-pointer" onClick={handleRestart}>
+          <button
+            type="button"
+            className="flex items-center gap-2 text-emerald-600"
+            onClick={handleRestart}
+            aria-label="Start over"
+          >
             <Compass size={28} strokeWidth={2.5} />
             <span className="text-xl font-bold tracking-tight text-slate-900">Wanderlust</span>
-          </div>
+          </button>
           <div className="text-sm font-medium text-slate-500 hidden sm:block">
             AI-Powered Travel Planner
           </div>

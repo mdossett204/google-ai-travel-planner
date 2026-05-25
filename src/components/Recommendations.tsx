@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
-import { Recommendation } from '../services/geminiService';
-import { CheckCircle2, ArrowRight, Wallet, Calendar } from 'lucide-react';
+import { useMemo, useState } from "react";
+import type { Recommendation } from "../services/geminiService";
+import { CheckCircle2, ArrowRight, Wallet, Calendar } from "lucide-react";
 
 interface RecommendationsProps {
   recommendations: Recommendation[];
@@ -8,8 +8,20 @@ interface RecommendationsProps {
   onBack: () => void;
 }
 
+const entities: Record<string, string> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&apos;",
+};
+
 function buildSvgPlaceholder(title: string) {
-  const safeTitle = (title || 'Trip').slice(0, 40);
+  const safeTitle = (title || "Trip")
+    .slice(0, 40)
+    .replace(/[&<>"']/g, (char) => {
+      return entities[char];
+    });
   const encoded = encodeURIComponent(`<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600">
   <defs>
@@ -24,7 +36,7 @@ function buildSvgPlaceholder(title: string) {
     ${safeTitle}
   </text>
   <text x="40" y="515" fill="rgba(255,255,255,0.85)" font-family="system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif" font-size="24">
-    Image unavailable — showing placeholder
+    Image unavailable - showing placeholder
   </text>
 </svg>`);
   return `data:image/svg+xml;charset=utf-8,${encoded}`;
@@ -32,8 +44,7 @@ function buildSvgPlaceholder(title: string) {
 
 function RecommendationImage({ title }: { title: string }) {
   const primarySrc = useMemo(
-    () =>
-      `https://picsum.photos/seed/${encodeURIComponent(title)}/800/600`,
+    () => `https://picsum.photos/seed/${encodeURIComponent(title)}/800/600`,
     [title],
   );
   const fallbackSrc = useMemo(() => buildSvgPlaceholder(title), [title]);
@@ -53,7 +64,7 @@ function RecommendationImage({ title }: { title: string }) {
           if (src !== fallbackSrc) setSrc(fallbackSrc);
         }}
         className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ${
-          isLoaded ? 'opacity-100' : 'opacity-0'
+          isLoaded ? "opacity-100" : "opacity-0"
         }`}
       />
       {!isLoaded ? (
@@ -63,13 +74,21 @@ function RecommendationImage({ title }: { title: string }) {
   );
 }
 
-export default function Recommendations({ recommendations, onSelect, onBack }: RecommendationsProps) {
+export default function Recommendations({
+  recommendations,
+  onSelect,
+  onBack,
+}: RecommendationsProps) {
   return (
     <div className="max-w-5xl mx-auto">
       <div className="mb-8 flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-semibold text-slate-900 tracking-tight">Your Travel Options</h2>
-          <p className="text-slate-500 mt-2">We've crafted these recommendations based on your preferences.</p>
+          <h2 className="text-3xl font-semibold text-slate-900 tracking-tight">
+            Your Travel Options
+          </h2>
+          <p className="text-slate-500 mt-2">
+            We've crafted these recommendations based on your preferences.
+          </p>
         </div>
         <button
           onClick={onBack}
@@ -92,12 +111,16 @@ export default function Recommendations({ recommendations, onSelect, onBack }: R
               <RecommendationImage title={rec.title} />
               <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
               <div className="absolute bottom-4 left-4 right-4">
-                <h3 className="text-xl font-bold text-white leading-tight">{rec.title}</h3>
+                <h3 className="text-xl font-bold text-white leading-tight">
+                  {rec.title}
+                </h3>
               </div>
             </div>
 
             <div className="p-6 flex-1 flex flex-col">
-              <p className="text-slate-600 text-sm mb-6 flex-1">{rec.description}</p>
+              <p className="text-slate-600 text-sm mb-6 flex-1">
+                {rec.description}
+              </p>
 
               <div className="space-y-4 mb-6">
                 <div className="flex items-center gap-2 text-sm font-medium text-slate-900">
@@ -108,13 +131,21 @@ export default function Recommendations({ recommendations, onSelect, onBack }: R
                   <Calendar size={16} className="text-emerald-600" />
                   <span>Best Time: {rec.bestTimeToGo}</span>
                 </div>
-                
+
                 <div>
-                  <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Highlights</h4>
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">
+                    Highlights
+                  </h4>
                   <ul className="space-y-2">
                     {rec.highlights.map((highlight, idx) => (
-                      <li key={idx} className="flex items-start gap-2 text-sm text-slate-700">
-                        <CheckCircle2 size={16} className="text-emerald-500 shrink-0 mt-0.5" />
+                      <li
+                        key={idx}
+                        className="flex items-start gap-2 text-sm text-slate-700"
+                      >
+                        <CheckCircle2
+                          size={16}
+                          className="text-emerald-500 shrink-0 mt-0.5"
+                        />
                         <span>{highlight}</span>
                       </li>
                     ))}
@@ -127,7 +158,10 @@ export default function Recommendations({ recommendations, onSelect, onBack }: R
                 aria-hidden="true"
               >
                 <span>View Itinerary</span>
-                <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
+                <ArrowRight
+                  size={16}
+                  className="group-hover:translate-x-1 transition-transform"
+                />
               </div>
             </div>
           </button>
