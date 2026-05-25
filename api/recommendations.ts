@@ -1,5 +1,8 @@
 import crypto from "crypto";
-import { assertProviderApiKeysConfigured, generateText } from "../utils/llmRouter.js";
+import {
+  assertProviderApiKeysConfigured,
+  generateText,
+} from "../utils/llmRouter.js";
 import {
   validateRecommendationsResponse,
   validateTravelFormData,
@@ -114,10 +117,10 @@ export default async function handler(req: any, res: any) {
     Duration: ${durationValue} ${sanitize(data.durationUnit)}
     Travel Style: ${travelerType}
     Budget (Treat as upper limit, with +/- 20% flexibility only when clearly justified):
-      - Lodging: ${data.includeLodging ? `$${data.budget?.lodging || "Any"} per night` : "Not requested (ignore lodging)"}
-      - Local Transportation at Destination: $${data.budget?.localTransportation || "Any"} total
-      - Food: ${data.includeFood ? `$${data.budget?.food || "Any"} per day` : "Not requested (ignore food)"}
-      - Miscellaneous/Activities: $${data.budget?.misc || "Any"} total
+      - Lodging: ${data.includeLodging ? `$${data.budget?.lodging ?? "Any"} per night` : "Not requested (ignore lodging)"}
+      - Local Transportation at Destination: $${data.budget?.localTransportation ?? "Any"} total
+      - Food: ${data.includeFood ? `$${data.budget?.food ?? "Any"} per day` : "Not requested (ignore food)"}
+      - Miscellaneous/Activities: $${data.budget?.misc ?? "Any"} total
     Primary Goal(s): <goals>${data.primaryGoal?.length > 0 ? sanitize(data.primaryGoal.join(", ")) : "Any"}</goals>
     ${data.includeFood ? `FOOD PREFERENCES\n    ${foodPreferences}` : "FOOD: Not requested"}
     ${data.includeLodging ? `\n    LODGING PREFERENCES\n    ${lodgingPreferences}` : "\n    LODGING: Not requested"}
@@ -259,9 +262,7 @@ export default async function handler(req: any, res: any) {
       .set(cacheKey, JSON.stringify(parsed), {
         EX: 86400, // Cache for 24 hours
       })
-      .catch((err) =>
-        console.warn("[recommendations] Redis write error", err),
-      );
+      .catch((err) => console.warn("[recommendations] Redis write error", err));
 
     return sendJson(res, 200, parsed);
   } catch (err: any) {

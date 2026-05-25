@@ -43,33 +43,30 @@ function buildSvgPlaceholder(title: string) {
 }
 
 function RecommendationImage({ title }: { title: string }) {
-  const primarySrc = useMemo(
-    () => `https://picsum.photos/seed/${encodeURIComponent(title)}/800/600`,
-    [title],
-  );
+  const primarySrc = `https://picsum.photos/seed/${encodeURIComponent(title)}/800/600`;
   const fallbackSrc = useMemo(() => buildSvgPlaceholder(title), [title]);
-  const [src, setSrc] = useState(primarySrc);
+  const [imgError, setImgError] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
 
   return (
     <>
       <img
-        src={src}
+        src={imgError ? fallbackSrc : primarySrc}
         alt={title}
         referrerPolicy="no-referrer"
-        loading="eager"
         decoding="async"
         onLoad={() => setIsLoaded(true)}
         onError={() => {
-          if (src !== fallbackSrc) setSrc(fallbackSrc);
+          setImgError(true);
+          setIsLoaded(true);
         }}
         className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ${
           isLoaded ? "opacity-100" : "opacity-0"
         }`}
       />
-      {!isLoaded ? (
+      {!isLoaded && (
         <div className="absolute inset-0 bg-slate-200 animate-pulse" />
-      ) : null}
+      )}
     </>
   );
 }

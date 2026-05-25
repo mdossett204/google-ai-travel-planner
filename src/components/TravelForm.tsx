@@ -9,7 +9,7 @@ interface TravelFormProps {
   initialData?: TravelFormData | null;
 }
 
-const defaultFormData: TravelFormData = {
+const getDefaultFormData = (): TravelFormData => ({
   timeOfYear: [],
   durationValue: "",
   durationUnit: "days",
@@ -41,7 +41,7 @@ const defaultFormData: TravelFormData = {
     city: "",
   },
   attractionInterests: "",
-};
+});
 
 const EMPTY_FOOD_PREFERENCES: TravelFormData["foodPreferences"] = {
   dietaryRestrictions: [],
@@ -55,26 +55,27 @@ function buildInitialFormData(
   initialData?: TravelFormData | null,
 ): TravelFormData {
   if (!initialData) {
-    return defaultFormData;
+    return getDefaultFormData();
   }
 
+  const defaults = getDefaultFormData();
   return {
-    ...defaultFormData,
+    ...defaults,
     ...initialData,
     budget: {
-      ...defaultFormData.budget,
+      ...defaults.budget,
       ...initialData.budget,
     },
     foodPreferences: {
-      ...defaultFormData.foodPreferences,
+      ...defaults.foodPreferences,
       ...initialData.foodPreferences,
     },
     lodgingPreferences: {
-      ...defaultFormData.lodgingPreferences,
+      ...defaults.lodgingPreferences,
       ...initialData.lodgingPreferences,
     },
     preferredLocation: {
-      ...defaultFormData.preferredLocation,
+      ...defaults.preferredLocation,
       ...initialData.preferredLocation,
     },
   };
@@ -175,6 +176,7 @@ export default function TravelForm({
     buildInitialFormData(initialData),
   );
   const [showFoodPriorityError, setShowFoodPriorityError] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   const setIncludeFood = (includeFood: boolean) => {
     setFormData((prev) => ({
@@ -314,11 +316,25 @@ export default function TravelForm({
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
 
+    if (formData.timeOfYear.length === 0) {
+      setValidationError("Please select at least one Time of Year.");
+      return;
+    }
+    if (formData.primaryGoal.length === 0) {
+      setValidationError("Please select at least one Primary Goal.");
+      return;
+    }
+    if (!formData.activityLevel) {
+      setValidationError("Please select an Activity Level.");
+      return;
+    }
     if (formData.includeFood && !formData.foodPreferences.foodPriority) {
       setShowFoodPriorityError(true);
+      setValidationError("Please choose how important food is for this trip.");
       return;
     }
 
+    setValidationError(null);
     onSubmit(formData);
   };
 
@@ -358,6 +374,7 @@ export default function TravelForm({
                       ? "bg-emerald-100 border-emerald-500 text-emerald-800"
                       : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
                   }`}
+                  aria-pressed={formData.timeOfYear.includes(month)}
                 >
                   {month}
                 </button>
@@ -366,27 +383,32 @@ export default function TravelForm({
           </div>
 
           <div className="space-y-2">
-            <label className="block text-sm font-medium text-slate-700">
+            <label
+              htmlFor="durationValue"
+              className="block text-sm font-medium text-slate-700"
+            >
               Duration
             </label>
             <div className="flex gap-2">
               <input
+                id="durationValue"
                 type="number"
                 min="1"
+                step="1"
                 required
                 value={formData.durationValue}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const val = e.target.valueAsNumber;
                   setFormData((p) => ({
                     ...p,
-                    durationValue: e.target.value
-                      ? parseInt(e.target.value, 10)
-                      : "",
-                  }))
-                }
+                    durationValue: Number.isNaN(val) ? "" : val,
+                  }));
+                }}
                 className="w-2/3 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
                 placeholder="e.g. 5"
               />
               <select
+                aria-label="Duration unit"
                 value={formData.durationUnit}
                 onChange={(e) =>
                   setFormData((p) => ({
@@ -480,7 +502,10 @@ export default function TravelForm({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {formData.includeLodging ? (
                 <div className="space-y-1">
-                  <label className="text-xs text-slate-500">
+                  <label
+                    htmlFor="budgetLodging"
+                    className="text-xs text-slate-500"
+                  >
                     Lodging (per night)
                   </label>
                   <div className="relative">
@@ -488,15 +513,20 @@ export default function TravelForm({
                       $
                     </span>
                     <input
+                      id="budgetLodging"
                       type="number"
                       min="0"
                       value={formData.budget.lodging}
-                      onChange={(e) =>
+                      onChange={(e) => {
+                        const val = e.target.valueAsNumber;
                         setFormData((p) => ({
                           ...p,
-                          budget: { ...p.budget, lodging: e.target.value },
-                        }))
-                      }
+                          budget: {
+                            ...p.budget,
+                            lodging: Number.isNaN(val) ? "" : val,
+                          },
+                        }));
+                      }}
                       className="w-full rounded-xl border border-slate-300 bg-white pl-8 pr-4 py-2 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
                       placeholder="e.g. 150"
                     />
@@ -504,7 +534,10 @@ export default function TravelForm({
                 </div>
               ) : null}
               <div className="space-y-1">
-                <label className="text-xs text-slate-500">
+                <label
+                  htmlFor="budgetLocalTransport"
+                  className="text-xs text-slate-500"
+                >
                   Local Transportation (total)
                 </label>
                 <p className="text-xs text-slate-400">
@@ -515,18 +548,20 @@ export default function TravelForm({
                     $
                   </span>
                   <input
+                    id="budgetLocalTransport"
                     type="number"
                     min="0"
                     value={formData.budget.localTransportation}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const val = e.target.valueAsNumber;
                       setFormData((p) => ({
                         ...p,
                         budget: {
                           ...p.budget,
-                          localTransportation: e.target.value,
+                          localTransportation: Number.isNaN(val) ? "" : val,
                         },
-                      }))
-                    }
+                      }));
+                    }}
                     className="w-full rounded-xl border border-slate-300 bg-white pl-8 pr-4 py-2 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
                     placeholder="e.g. 120"
                   />
@@ -534,7 +569,10 @@ export default function TravelForm({
               </div>
               {formData.includeFood ? (
                 <div className="space-y-1">
-                  <label className="text-xs text-slate-500">
+                  <label
+                    htmlFor="budgetFood"
+                    className="text-xs text-slate-500"
+                  >
                     Food (per day)
                   </label>
                   <div className="relative">
@@ -542,15 +580,20 @@ export default function TravelForm({
                       $
                     </span>
                     <input
+                      id="budgetFood"
                       type="number"
                       min="0"
                       value={formData.budget.food}
-                      onChange={(e) =>
+                      onChange={(e) => {
+                        const val = e.target.valueAsNumber;
                         setFormData((p) => ({
                           ...p,
-                          budget: { ...p.budget, food: e.target.value },
-                        }))
-                      }
+                          budget: {
+                            ...p.budget,
+                            food: Number.isNaN(val) ? "" : val,
+                          },
+                        }));
+                      }}
                       className="w-full rounded-xl border border-slate-300 bg-white pl-8 pr-4 py-2 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
                       placeholder="e.g. 100"
                     />
@@ -558,7 +601,7 @@ export default function TravelForm({
                 </div>
               ) : null}
               <div className="space-y-1">
-                <label className="text-xs text-slate-500">
+                <label htmlFor="budgetMisc" className="text-xs text-slate-500">
                   Activities & Misc (total)
                 </label>
                 <div className="relative">
@@ -566,15 +609,20 @@ export default function TravelForm({
                     $
                   </span>
                   <input
+                    id="budgetMisc"
                     type="number"
                     min="0"
                     value={formData.budget.misc}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const val = e.target.valueAsNumber;
                       setFormData((p) => ({
                         ...p,
-                        budget: { ...p.budget, misc: e.target.value },
-                      }))
-                    }
+                        budget: {
+                          ...p.budget,
+                          misc: Number.isNaN(val) ? "" : val,
+                        },
+                      }));
+                    }}
                     className="w-full rounded-xl border border-slate-300 bg-white pl-8 pr-4 py-2 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
                     placeholder="e.g. 300"
                   />
@@ -601,6 +649,7 @@ export default function TravelForm({
                       ? "bg-emerald-100 border-emerald-500 text-emerald-800"
                       : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
                   }`}
+                  aria-pressed={formData.primaryGoal.includes(option)}
                 >
                   {option}
                 </button>
@@ -665,6 +714,7 @@ export default function TravelForm({
                       ? "bg-emerald-100 border-emerald-500 text-emerald-800"
                       : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
                   }`}
+                  aria-pressed={formData.localTransportation.includes(option)}
                 >
                   {option}
                 </button>
@@ -675,7 +725,10 @@ export default function TravelForm({
 
         <div className="space-y-4 pt-4 border-t border-slate-100">
           <div className="space-y-2">
-            <label className="block text-sm font-medium text-slate-700">
+            <label
+              htmlFor="locationCountry"
+              className="block text-sm font-medium text-slate-700"
+            >
               Preferred Location
             </label>
             <p className="text-xs text-slate-500 mb-2">
@@ -684,6 +737,7 @@ export default function TravelForm({
             </p>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <input
+                id="locationCountry"
                 type="text"
                 value={formData.preferredLocation.country}
                 onChange={(e) =>
@@ -694,6 +748,7 @@ export default function TravelForm({
                 className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
               />
               <input
+                aria-label="State or Province"
                 type="text"
                 value={formData.preferredLocation.stateOrProvince}
                 onChange={(e) =>
@@ -706,6 +761,7 @@ export default function TravelForm({
                 className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
               />
               <input
+                aria-label="City"
                 type="text"
                 value={formData.preferredLocation.city}
                 onChange={(e) =>
@@ -757,6 +813,9 @@ export default function TravelForm({
                           ? "bg-emerald-100 border-emerald-500 text-emerald-800"
                           : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
                       }`}
+                      aria-pressed={formData.foodPreferences.foodPlaceTypes.includes(
+                        option,
+                      )}
                     >
                       {option}
                     </button>
@@ -781,6 +840,9 @@ export default function TravelForm({
                           ? "bg-emerald-100 border-emerald-500 text-emerald-800"
                           : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
                       }`}
+                      aria-pressed={formData.foodPreferences.dietaryRestrictions.includes(
+                        option,
+                      )}
                     >
                       {option}
                     </button>
@@ -805,6 +867,9 @@ export default function TravelForm({
                           ? "bg-emerald-100 border-emerald-500 text-emerald-800"
                           : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
                       }`}
+                      aria-pressed={formData.foodPreferences.cuisineInterests.includes(
+                        option,
+                      )}
                     >
                       {option}
                     </button>
@@ -827,6 +892,9 @@ export default function TravelForm({
                           ? "bg-emerald-100 border-emerald-500 text-emerald-800"
                           : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
                       }`}
+                      aria-pressed={formData.foodPreferences.diningStyle.includes(
+                        option,
+                      )}
                     >
                       {option}
                     </button>
@@ -889,6 +957,9 @@ export default function TravelForm({
                         ? "bg-emerald-100 border-emerald-500 text-emerald-800"
                         : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
                     }`}
+                    aria-pressed={formData.lodgingPreferences.lodgingTypes.includes(
+                      option,
+                    )}
                   >
                     {option}
                   </button>
@@ -898,12 +969,19 @@ export default function TravelForm({
           ) : null}
         </div>
 
+        {validationError && (
+          <div className="pt-2 text-sm text-red-600 font-medium text-center">
+            {validationError}
+          </div>
+        )}
+
         <div className="pt-6 flex gap-4">
           <button
             type="button"
             onClick={() => {
-              setFormData(defaultFormData);
+              setFormData(getDefaultFormData());
               setShowFoodPriorityError(false);
+              setValidationError(null);
             }}
             disabled={isLoading}
             className="px-6 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-xl transition-colors disabled:opacity-70"
