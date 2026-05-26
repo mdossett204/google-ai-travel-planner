@@ -32,6 +32,12 @@ const GLOBAL_LLM_RATE_LIMIT_WINDOW_SEC = 60;
 let lastGeminiRequestAt = 0;
 let geminiQueue: Promise<void> = Promise.resolve();
 
+const clients: {
+  openai?: OpenAI;
+  anthropic?: Anthropic;
+  gemini?: GoogleGenAI;
+} = {};
+
 interface GeminiFunctionCall {
   name: string;
   args?: Record<string, unknown>;
@@ -411,7 +417,9 @@ export function calculateMaxToolCallsForTrip(inputs: ToolBudgetInputs): number {
   const base = onLocationDays * dailyLocations;
   const lodging = inputs.includeLodging ? 3 : 0;
   const food =
-    inputs.includeFood && inputs.isFoodMajorTripFocus ? 3 * inputs.durationDays : 0;
+    inputs.includeFood && inputs.isFoodMajorTripFocus
+      ? 3 * inputs.durationDays
+      : 0;
 
   const raw = (base + lodging + food) * 1.5;
   return Math.max(0, Math.ceil(raw));
@@ -443,7 +451,9 @@ export async function generateTextWithMeta(
   // }
 
   if (provider === "openai") {
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const openai = (clients.openai ??= new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    }));
     resolvedModel = model || "gpt-5-mini";
     const hasOpenAITools = (opts.openaiTools?.length || 0) > 0;
     const openaiTools = opts.openaiTools ?? [];
@@ -577,10 +587,9 @@ export async function generateTextWithMeta(
       }
     }
   } else if (provider === "anthropic") {
-    const systemPrefix = opts.systemInstruction
-      ? `System:\n${opts.systemInstruction}\n\n`
-      : "";
-    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const anthropic = (clients.anthropic ??= new Anthropic({
+      apiKey: process.env.ANTHROPIC_API_KEY,
+    }));
     resolvedModel = model || "claude-haiku-4-5";
     const hasAnthropicTools = (opts.anthropicTools?.length || 0) > 0;
     const anthropicTools = opts.anthropicTools ?? [];
@@ -595,14 +604,15 @@ export async function generateTextWithMeta(
           return anthropic.messages.create({
             model: resolvedModel,
             max_tokens: getAnthropicMaxTokens(),
-            messages: [{ role: "user", content: systemPrefix + opts.prompt }],
+            system: opts.systemInstruction,
+            messages: [{ role: "user", content: opts.prompt }],
           });
         },
       });
       text = normalizeText(msg);
     } else {
       let messages: Anthropic.MessageParam[] = [
-        { role: "user", content: systemPrefix + opts.prompt },
+        { role: "user", content: opts.prompt },
       ];
       let totalToolCalls = 0;
 
@@ -616,6 +626,7 @@ export async function generateTextWithMeta(
             return anthropic.messages.create({
               model: resolvedModel,
               max_tokens: getAnthropicMaxTokens(),
+              system: opts.systemInstruction,
               tools: anthropicTools,
               messages,
             });
@@ -720,7 +731,9 @@ export async function generateTextWithMeta(
       }
     }
   } else {
-    const gemini = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const gemini = (clients.gemini ??= new GoogleGenAI({
+      apiKey: process.env.GEMINI_API_KEY,
+    }));
     resolvedModel = model || "gemini-2.5-flash";
     const hasGeminiFunctionTools = (opts.geminiTools?.length || 0) > 0;
     const tools = hasGeminiFunctionTools

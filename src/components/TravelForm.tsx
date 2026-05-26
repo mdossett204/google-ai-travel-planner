@@ -316,10 +316,6 @@ export default function TravelForm({
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
 
-    if (formData.timeOfYear.length === 0) {
-      setValidationError("Please select at least one Time of Year.");
-      return;
-    }
     if (formData.primaryGoal.length === 0) {
       setValidationError("Please select at least one Primary Goal.");
       return;

@@ -45,6 +45,18 @@ const tomTomCache = new Map<
   { expiresAt: number; results: TomTomSearchResult[] }
 >();
 
+function evictLeastRecentlyUsed() {
+  if (tomTomCache.size <= 1000) return;
+
+  const entriesToDelete = Math.ceil(tomTomCache.size * 0.2); // Remove LRU 20%
+  let deletedCount = 0;
+  for (const key of tomTomCache.keys()) {
+    tomTomCache.delete(key);
+    deletedCount++;
+    if (deletedCount >= entriesToDelete) break;
+  }
+}
+
 export class TomTomConfigurationError extends Error {
   constructor(message: string) {
     super(message);
@@ -243,6 +255,9 @@ export async function searchTomTom({
         query: trimmedQuery,
       });
     }
+    // LRU Trick: Delete and immediately re-set to bump it to the end of the Map
+    tomTomCache.delete(cacheKey);
+    tomTomCache.set(cacheKey, cached);
     return cached.results;
   }
 
@@ -257,7 +272,7 @@ export async function searchTomTom({
           query: trimmedQuery,
         });
       }
-      if (tomTomCache.size > 1000) tomTomCache.clear();
+      evictLeastRecentlyUsed();
       tomTomCache.set(cacheKey, {
         expiresAt: Date.now() + TOMTOM_CACHE_TTL_MS,
         results: parsedResults,
@@ -302,10 +317,7 @@ export async function searchTomTom({
       const rawResults = Array.isArray(payload.results) ? payload.results : [];
       results = rawResults.map(normalizeSearchResult);
 
-      // Prevent memory leaks in warm serverless containers
-      if (tomTomCache.size > 1000) {
-        tomTomCache.clear();
-      }
+      evictLeastRecentlyUsed();
       tomTomCache.set(cacheKey, {
         expiresAt: Date.now() + TOMTOM_CACHE_TTL_MS,
         results,

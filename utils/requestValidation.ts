@@ -191,7 +191,7 @@ export function validateTravelFormData(raw: unknown): ValidatedTravelFormData {
       : {};
 
   return {
-    timeOfYear: parseStringArray(input.timeOfYear, "timeOfYear"),
+    timeOfYear: parseOptionalStringArray(input.timeOfYear, "timeOfYear"),
     durationValue: parsePositiveNumber(input.durationValue, "durationValue"),
     durationUnit: parseStringEnum(input.durationUnit, "durationUnit", [
       "days",
@@ -360,14 +360,15 @@ export function validateTomTomPoiSearchRequest(
 ): ValidatedTomTomPoiSearchRequest {
   const input = requireRecord(raw, "Request body");
   const query = parseString(input.query, "query", { allowEmpty: false }).trim();
-  const limit =
+  const limitRaw =
     typeof input.limit === "undefined"
       ? 5
       : parseOptionalNumber(input.limit, "limit");
 
-  if (!limit || limit <= 0) {
+  if (!limitRaw || limitRaw <= 0) {
     throw new RequestValidationError("limit must be a positive number.");
   }
+  const limit: number = limitRaw;
 
   return {
     query,
