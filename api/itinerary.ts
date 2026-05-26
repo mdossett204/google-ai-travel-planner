@@ -78,7 +78,7 @@ function getItineraryVerificationConfig(): {
 
   return {
     provider: "openai",
-    model: process.env.ITINERARY_VERIFICATION_MODEL || "gpt-5-nano",
+    model: process.env.ITINERARY_VERIFICATION_MODEL || "gpt-5-mini",
     openaiTools: getOpenAIVerificationTools(),
   };
 }
@@ -93,7 +93,8 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    assertProviderApiKeysConfigured(["gemini", "anthropic", "openai"]);
+    const verificationConfig = getItineraryVerificationConfig();
+    assertProviderApiKeysConfigured(["gemini", verificationConfig.provider]);
     assertTomTomApiKeyConfigured();
     assertRedisConfigured();
 
@@ -117,14 +118,7 @@ export default async function handler(req: any, res: any) {
             .join(", ")
         : "Not specified";
 
-    if (!data || !recommendation) {
-      return sendJson(res, 400, {
-        error: "Missing travel form data or recommendation.",
-      });
-    }
-
     const durationValue = data.durationValue;
-    const verificationConfig = getItineraryVerificationConfig();
     const durationDays =
       data.durationUnit === "weeks"
         ? Math.round(durationValue * 7)

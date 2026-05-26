@@ -28,7 +28,6 @@ interface TomTomSearchResponse {
 
 interface TomTomMatchOptions {
   placeName: string;
-  locationHint?: string;
   result: TomTomSearchResult | null;
 }
 
@@ -137,19 +136,87 @@ function normalizeSearchResult(result: any): TomTomSearchResult {
   };
 }
 
-export function isTomTomResultMatch({
-  placeName,
-  locationHint = "",
-  result,
-}: TomTomMatchOptions) {
-  void placeName;
-  void locationHint;
+function normalizeForMatch(s: string): string {
+  return s
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .trim();
+}
 
+export function isTomTomResultMatch({ placeName, result }: TomTomMatchOptions) {
   if (!result || !result.name.trim()) {
     return false;
   }
 
-  return true;
+  const normalizedPlace = normalizeForMatch(placeName);
+  const normalizedResult = normalizeForMatch(result.name);
+
+  if (!normalizedPlace) return false;
+
+  if (
+    normalizedResult.includes(normalizedPlace) ||
+    normalizedPlace.includes(normalizedResult)
+  ) {
+    return true;
+  }
+
+  // Token overlap: accept if ≥ half of the query tokens appear in the result name
+  const placeTokens = normalizedPlace.split(/\s+/).filter(Boolean);
+  const matchCount = placeTokens.filter((t) =>
+    normalizedResult.includes(t),
+  ).length;
+  if (matchCount >= Math.ceil(placeTokens.length / 2)) {
+    return true;
+  }
+
+  return false;
+}
+
+export async function executeSearchPlace(
+  args: any,
+  debugLabel: string,
+): Promise<any> {
+  const placeName = typeof args.name === "string" ? args.name.trim() : "";
+  const locationHint =
+    typeof args.locationHint === "string" ? args.locationHint.trim() : "";
+
+  if (!placeName) {
+    return {
+      ok: false,
+      error: "Missing required argument: name",
+    };
+  }
+
+  const query = [placeName, locationHint].filter(Boolean).join(" ");
+  const results = await searchTomTom({ query, limit: 1 });
+  const result = results[0] || null;
+  const isMatch = isTomTomResultMatch({ placeName, result });
+
+  if (process.env.DEBUG_LLM_ROUTER === "true") {
+    console.warn(`[${debugLabel}] search_place-result`, {
+      query,
+      isMatch,
+      result,
+    });
+  }
+
+  if (!isMatch) {
+    return {
+      ok: false,
+      query,
+      error:
+        "Top search result did not match the requested place closely enough.",
+      result: null,
+    };
+  }
+
+  return {
+    ok: true,
+    query,
+    result,
+  };
 }
 
 export async function searchTomTom({
