@@ -28,6 +28,7 @@ interface TomTomSearchResponse {
 
 interface TomTomMatchOptions {
   placeName: string;
+  locationHint?: string;
   result: TomTomSearchResult | null;
 }
 
@@ -106,9 +107,9 @@ function buildCacheKey({
 async function waitForTomTomSlot() {
   const success = await runFixedWindowRateLimit("tomtom-global-limit", 5, 1);
   if (!success) {
-    const error: any = new Error("TomTom global rate limit exceeded");
-    error.status = 429;
-    throw error;
+    throw Object.assign(new Error("TomTom global rate limit exceeded"), {
+      status: 429,
+    });
   }
 
   const previous = tomTomQueue;
@@ -129,21 +130,24 @@ async function waitForTomTomSlot() {
   release();
 }
 
-function normalizeSearchResult(result: any): TomTomSearchResult {
+function normalizeSearchResult(rawResult: unknown): TomTomSearchResult {
+  const result = rawResult as Record<string, unknown>;
+  const poi = (result?.poi || {}) as Record<string, unknown>;
+  const address = (result?.address || {}) as Record<string, unknown>;
+  const position = (result?.position || {}) as Record<string, unknown>;
+
   return {
-    id: result?.id || "",
-    name: result?.poi?.name || "",
-    address: result?.address?.freeformAddress || "",
-    city: result?.address?.municipality || "",
-    region: result?.address?.countrySubdivisionName || "",
-    country: result?.address?.country || "",
-    website: result?.poi?.url || "",
-    phone: result?.poi?.phone || "",
-    categories: Array.isArray(result?.poi?.categories)
-      ? result.poi.categories
-      : [],
-    lat: typeof result?.position?.lat === "number" ? result.position.lat : null,
-    lon: typeof result?.position?.lon === "number" ? result.position.lon : null,
+    id: (result?.id as string) || "",
+    name: (poi?.name as string) || "",
+    address: (address?.freeformAddress as string) || "",
+    city: (address?.municipality as string) || "",
+    region: (address?.countrySubdivisionName as string) || "",
+    country: (address?.country as string) || "",
+    website: (poi?.url as string) || "",
+    phone: (poi?.phone as string) || "",
+    categories: Array.isArray(poi?.categories) ? poi.categories : [],
+    lat: typeof position?.lat === "number" ? position.lat : null,
+    lon: typeof position?.lon === "number" ? position.lon : null,
     score: typeof result?.score === "number" ? result.score : null,
   };
 }
@@ -157,7 +161,11 @@ function normalizeForMatch(s: string): string {
     .trim();
 }
 
-export function isTomTomResultMatch({ placeName, result }: TomTomMatchOptions) {
+export function isTomTomResultMatch({
+  placeName,
+  locationHint,
+  result,
+}: TomTomMatchOptions) {
   if (!result || !result.name.trim()) {
     return false;
   }
@@ -167,29 +175,53 @@ export function isTomTomResultMatch({ placeName, result }: TomTomMatchOptions) {
 
   if (!normalizedPlace) return false;
 
-  if (
-    normalizedResult.includes(normalizedPlace) ||
-    normalizedPlace.includes(normalizedResult)
-  ) {
-    return true;
-  }
-
-  // Token overlap: accept if ≥ half of the query tokens appear in the result name
   const placeTokens = normalizedPlace.split(/\s+/).filter(Boolean);
-  const matchCount = placeTokens.filter((t) =>
-    normalizedResult.includes(t),
-  ).length;
-  if (matchCount >= Math.ceil(placeTokens.length / 2)) {
-    return true;
+  const resultTokens = normalizedResult.split(/\s+/).filter(Boolean);
+
+  if (placeTokens.length === 0 || resultTokens.length === 0) return false;
+
+  // 1. Strict Name Match: Token overlap must be strictly > 50%
+  const intersection = placeTokens.filter((t) => resultTokens.includes(t));
+  const overlapRatio = intersection.length / placeTokens.length;
+
+  let isNameMatch = overlapRatio > 0.5;
+
+  // Substring fallback for single-word queries matching multi-word results
+  // e.g. "Louvre" matches "The Louvre Museum"
+  if (
+    !isNameMatch &&
+    placeTokens.length === 1 &&
+    normalizedResult.includes(normalizedPlace)
+  ) {
+    isNameMatch = true;
   }
 
-  return false;
+  if (!isNameMatch) return false;
+
+  // 2. Geographic Match
+  if (locationHint) {
+    const hintTokens = normalizeForMatch(locationHint)
+      .split(/\s+/)
+      .filter((t) => t.length > 1); // Ignore single letters
+
+    if (hintTokens.length > 0) {
+      const geoString = normalizeForMatch(
+        [result.city, result.region, result.country, result.address].join(" "),
+      );
+
+      // The result must contain at least one significant word from the location hint
+      const hasGeoMatch = hintTokens.some((t) => geoString.includes(t));
+      if (!hasGeoMatch) return false;
+    }
+  }
+
+  return true;
 }
 
 export async function executeSearchPlace(
-  args: any,
+  args: Record<string, unknown>,
   debugLabel: string,
-): Promise<any> {
+): Promise<Record<string, unknown>> {
   const placeName = typeof args.name === "string" ? args.name.trim() : "";
   const locationHint =
     typeof args.locationHint === "string" ? args.locationHint.trim() : "";
@@ -204,7 +236,7 @@ export async function executeSearchPlace(
   const query = [placeName, locationHint].filter(Boolean).join(" ");
   const results = await searchTomTom({ query, limit: 1 });
   const result = results[0] || null;
-  const isMatch = isTomTomResultMatch({ placeName, result });
+  const isMatch = isTomTomResultMatch({ placeName, locationHint, result });
 
   if (process.env.DEBUG_LLM_ROUTER === "true") {
     console.warn(`[${debugLabel}] search_place-result`, {

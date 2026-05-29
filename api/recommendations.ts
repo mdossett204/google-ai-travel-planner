@@ -1,14 +1,14 @@
-import crypto from "crypto";
 import {
   assertProviderApiKeysConfigured,
   generateText,
+  getProvider,
 } from "../utils/llmRouter.js";
 import {
   validateRecommendationsResponse,
   validateTravelFormData,
 } from "../utils/requestValidation.js";
 import { readJsonBody } from "../utils/http.js";
-import { assertRedisConfigured, getRedisClient } from "../utils/redis.js";
+import { assertRedisConfigured } from "../utils/redis.js";
 import { formatFoodPreferences } from "../utils/foodPreferences.js";
 import { formatLodgingPreferences } from "../utils/lodgingPreferences.js";
 import {
@@ -16,7 +16,18 @@ import {
   formatTravelerType,
 } from "../utils/tripContext.js";
 
-function sendJson(res: any, status: number, data: any) {
+interface ApiRequest {
+  method?: string;
+  [key: string]: unknown;
+}
+
+interface ApiResponse {
+  statusCode: number;
+  setHeader(name: string, value: string): void;
+  end(data?: string): void;
+}
+
+function sendJson(res: ApiResponse, status: number, data: unknown) {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.setHeader("X-Content-Type-Options", "nosniff");
@@ -39,13 +50,13 @@ const monthLabels: Record<string, string> = {
   Dec: "December (winter)",
 };
 
-function sanitize(str: any) {
-  return String(str || "").replace(/[<>]/g, (c) =>
+function sanitize(str: unknown): string {
+  return String(str ?? "").replace(/[<>]/g, (c) =>
     c === "<" ? "&lt;" : "&gt;",
   );
 }
 
-export default async function handler(req: any, res: any) {
+export default async function handler(req: ApiRequest, res: ApiResponse) {
   if (req.method === "OPTIONS") {
     res.statusCode = 204;
     return res.end();
@@ -54,7 +65,7 @@ export default async function handler(req: any, res: any) {
     return sendJson(res, 405, { error: "Method not allowed" });
 
   try {
-    assertProviderApiKeysConfigured(["gemini"]);
+    assertProviderApiKeysConfigured([getProvider()]);
     assertRedisConfigured();
 
     const data = validateTravelFormData(await readJsonBody(req));
@@ -87,27 +98,6 @@ export default async function handler(req: any, res: any) {
     ]
       .filter(Boolean)
       .join("\n    ");
-
-    const cacheKey =
-      "recs:" +
-      crypto
-        .createHash("sha256")
-        .update(JSON.stringify({ version: 2, data }))
-        .digest("hex");
-    const redis = await getRedisClient();
-    try {
-      const cached = await redis.get(cacheKey);
-      if (cached) {
-        const cachedJson = String(cached);
-        return sendJson(
-          res,
-          200,
-          validateRecommendationsResponse(JSON.parse(cachedJson)),
-        );
-      }
-    } catch (err) {
-      console.warn("[recommendations] Redis read error", err);
-    }
 
     const prompt = `
     Based on the travel preferences below, provide exactly 3 travel recommendations.
@@ -258,34 +248,33 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    redis
-      .set(cacheKey, JSON.stringify(parsed), {
-        EX: 86400, // Cache for 24 hours
-      })
-      .catch((err) => console.warn("[recommendations] Redis write error", err));
-
     return sendJson(res, 200, parsed);
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error(err);
-    if (err?.name === "RequestValidationError") {
-      return sendJson(res, 400, { error: err.message });
+    const name =
+      err instanceof Error ? err.name : (err as Record<string, unknown>)?.name;
+    const message =
+      err instanceof Error
+        ? err.message
+        : (err as Record<string, unknown>)?.message;
+    const status = (err as Record<string, unknown>)?.status;
+
+    if (name === "RequestValidationError") {
+      return sendJson(res, 400, { error: message });
     }
-    if (err?.name === "InvalidJsonBodyError") {
-      return sendJson(res, 400, { error: err.message });
+    if (name === "InvalidJsonBodyError") {
+      return sendJson(res, 400, { error: message });
     }
-    if (err?.name === "RequestBodyTooLargeError") {
-      return sendJson(res, 413, { error: err.message });
+    if (name === "RequestBodyTooLargeError") {
+      return sendJson(res, 413, { error: message });
     }
-    if (err?.name === "LlmConfigurationError") {
-      return sendJson(res, 500, { error: err.message });
+    if (name === "LlmConfigurationError") {
+      return sendJson(res, 500, { error: message });
     }
-    if (
-      err?.name === "RedisConfigurationError" ||
-      err?.name === "RedisConnectionError"
-    ) {
-      return sendJson(res, 500, { error: err.message });
+    if (name === "RedisConfigurationError" || name === "RedisConnectionError") {
+      return sendJson(res, 500, { error: message });
     }
-    if (err?.status === 429 || err?.message?.includes("rate limit")) {
+    if (status === 429 || String(message).includes("rate limit")) {
       return sendJson(res, 429, {
         error: "Our AI is currently busy. Please wait a moment and try again!",
       });

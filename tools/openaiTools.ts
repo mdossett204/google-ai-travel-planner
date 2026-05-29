@@ -3,7 +3,7 @@ import { executeSearchPlace } from "./tomtomSearch.js";
 
 export interface OpenAIToolExecutionContext {
   name: string;
-  args: any;
+  args: Record<string, unknown>;
 }
 
 export function getOpenAIVerificationTools(): OpenAI.Chat.ChatCompletionTool[] {
@@ -29,7 +29,7 @@ export function getOpenAIVerificationTools(): OpenAI.Chat.ChatCompletionTool[] {
             },
           },
           required: ["name"],
-        } as any,
+        } as Record<string, unknown>,
       },
     },
   ];
@@ -38,7 +38,7 @@ export function getOpenAIVerificationTools(): OpenAI.Chat.ChatCompletionTool[] {
 export async function executeOpenAITool({
   name,
   args,
-}: OpenAIToolExecutionContext): Promise<any> {
+}: OpenAIToolExecutionContext): Promise<Record<string, unknown>> {
   if (name === "search_place") {
     return executeSearchPlace(args, "openaiTools");
   }

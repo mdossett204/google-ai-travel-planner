@@ -10,7 +10,7 @@ export interface GeminiToolDefinition {
 
 export interface GeminiToolExecutionContext {
   name: string;
-  args: any;
+  args: Record<string, unknown>;
 }
 
 export function getGeminiVerificationTools(): GeminiToolDefinition[] {
@@ -46,7 +46,7 @@ export function getGeminiVerificationTools(): GeminiToolDefinition[] {
 export async function executeGeminiTool({
   name,
   args,
-}: GeminiToolExecutionContext): Promise<any> {
+}: GeminiToolExecutionContext): Promise<Record<string, unknown>> {
   if (name === "search_place") {
     return executeSearchPlace(args, "geminiTools");
   }

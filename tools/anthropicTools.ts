@@ -3,7 +3,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 
 export interface AnthropicToolExecutionContext {
   name: string;
-  args: any;
+  args: Record<string, unknown>;
 }
 
 export function getAnthropicVerificationTools(): Anthropic.Tool[] {
@@ -34,7 +34,7 @@ export function getAnthropicVerificationTools(): Anthropic.Tool[] {
 export async function executeAnthropicTool({
   name,
   args,
-}: AnthropicToolExecutionContext): Promise<any> {
+}: AnthropicToolExecutionContext): Promise<Record<string, unknown>> {
   if (name === "search_place") {
     return executeSearchPlace(args, "anthropicTools");
   }

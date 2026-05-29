@@ -54,9 +54,9 @@ async function waitForGeminiSlot() {
     GLOBAL_LLM_RATE_LIMIT_WINDOW_SEC,
   );
   if (!success) {
-    const error: any = new Error("Global rate limit exceeded");
-    error.status = 429;
-    throw error;
+    throw Object.assign(new Error("Global rate limit exceeded"), {
+      status: 429,
+    });
   }
 
   const previous = geminiQueue;
@@ -90,20 +90,21 @@ async function waitForLlmRequestSlot(provider: LlmProvider) {
     GLOBAL_LLM_RATE_LIMIT_WINDOW_SEC,
   );
   if (!success) {
-    const error: any = new Error("Global rate limit exceeded");
-    error.status = 429;
-    throw error;
+    throw Object.assign(new Error("Global rate limit exceeded"), {
+      status: 429,
+    });
   }
 }
 
-function isRateLimitError(err: any) {
+function isRateLimitError(err: unknown) {
+  const e = err as Record<string, any>;
   return (
-    err?.status === 429 ||
-    err?.statusCode === 429 ||
-    err?.code === 429 ||
-    err?.error?.code === 429 ||
-    err?.error?.status === "RESOURCE_EXHAUSTED" ||
-    err?.status === "RESOURCE_EXHAUSTED"
+    e?.status === 429 ||
+    e?.statusCode === 429 ||
+    e?.code === 429 ||
+    e?.error?.code === 429 ||
+    e?.error?.status === "RESOURCE_EXHAUSTED" ||
+    e?.status === "RESOURCE_EXHAUSTED"
   );
 }
 
@@ -121,7 +122,7 @@ async function withLlmRetry<T>({
   for (let attempt = 0; attempt < LLM_MAX_RETRIES; attempt += 1) {
     try {
       return await fn();
-    } catch (err: any) {
+    } catch (err: unknown) {
       const isLastAttempt = attempt === LLM_MAX_RETRIES - 1;
       if (!isRateLimitError(err) || isLastAttempt) {
         throw err;
@@ -144,7 +145,7 @@ async function withLlmRetry<T>({
   throw new Error("LLM retry failed unexpectedly.");
 }
 
-function getProvider(input?: string): LlmProvider {
+export function getProvider(input?: string): LlmProvider {
   const raw = (input || "").toLowerCase().trim() as LlmProvider;
   if (PROVIDERS.includes(raw)) return raw;
   const env = (process.env.DEFAULT_LLM_PROVIDER || "")
@@ -165,12 +166,13 @@ function getProviderApiKeyEnvVar(provider: LlmProvider) {
   }
 }
 
-function getAnthropicMaxTokens() {
+const ANTHROPIC_MAX_TOKENS = (() => {
   const raw = process.env.ANTHROPIC_MAX_TOKENS;
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-  if (Number.isFinite(parsed) && parsed > 0) return parsed;
-  return DEFAULT_ANTHROPIC_MAX_TOKENS;
-}
+  return Number.isFinite(parsed) && parsed > 0
+    ? parsed
+    : DEFAULT_ANTHROPIC_MAX_TOKENS;
+})();
 
 export function assertProviderApiKeyConfigured(provider: LlmProvider) {
   const envVar = getProviderApiKeyEnvVar(provider);
@@ -188,12 +190,13 @@ export function assertProviderApiKeysConfigured(providers: LlmProvider[]) {
   }
 }
 
-function normalizeText(input: any): string {
+function normalizeText(input: unknown): string {
   if (typeof input === "string") return input.trim();
-  const blocks = Array.isArray(input?.content) ? input.content : [];
+  const safeInput = input as Record<string, any>;
+  const blocks = Array.isArray(safeInput?.content) ? safeInput.content : [];
   const text = blocks
-    .filter((b: any) => b?.type === "text")
-    .map((b: any) => b?.text || "")
+    .filter((b: Record<string, any>) => b?.type === "text")
+    .map((b: Record<string, any>) => b?.text || "")
     .join("\n")
     .trim();
   return text;
@@ -312,7 +315,7 @@ async function finalizeAnthropicWithoutTools({
       await waitForLlmRequestSlot("anthropic");
       return anthropic.messages.create({
         model,
-        max_tokens: getAnthropicMaxTokens(),
+        max_tokens: ANTHROPIC_MAX_TOKENS,
         messages: finalMessages as any,
       });
     },
@@ -428,6 +431,7 @@ export function calculateMaxToolCallsForTrip(inputs: ToolBudgetInputs): number {
 export async function generateTextWithMeta(
   opts: GenerateTextOptions,
 ): Promise<GenerateTextResult> {
+  const startedAt = Date.now();
   const provider = getProvider(opts.provider) || "gemini";
   assertProviderApiKeyConfigured(provider);
   const model = opts.model?.trim() || "";
@@ -440,15 +444,15 @@ export async function generateTextWithMeta(
       ? Math.max(0, Math.floor(opts.maxToolCalls))
       : MAX_TOOL_CALLS;
 
-  // if (isDebug) {
-  //   console.warn("[llmRouter] request", {
-  //     provider,
-  //     model,
-  //     promptLength: opts.prompt.length,
-  //     useSearchTool: opts.useSearchTool ?? false,
-  //   });
-  //   console.warn("[llmRouter] prompt", opts.prompt);
-  // }
+  if (isDebug) {
+    console.warn("[llmRouter] request", {
+      provider,
+      model,
+      promptLength: opts.prompt.length,
+      useSearchTool: opts.useSearchTool ?? false,
+    });
+    console.warn("[llmRouter] prompt", opts.prompt);
+  }
 
   if (provider === "openai") {
     const openai = (clients.openai ??= new OpenAI({
@@ -603,7 +607,7 @@ export async function generateTextWithMeta(
           await waitForLlmRequestSlot("anthropic");
           return anthropic.messages.create({
             model: resolvedModel,
-            max_tokens: getAnthropicMaxTokens(),
+            max_tokens: ANTHROPIC_MAX_TOKENS,
             system: opts.systemInstruction,
             messages: [{ role: "user", content: opts.prompt }],
           });
@@ -625,7 +629,7 @@ export async function generateTextWithMeta(
             await waitForLlmRequestSlot("anthropic");
             return anthropic.messages.create({
               model: resolvedModel,
-              max_tokens: getAnthropicMaxTokens(),
+              max_tokens: ANTHROPIC_MAX_TOKENS,
               system: opts.systemInstruction,
               tools: anthropicTools,
               messages,
@@ -896,15 +900,15 @@ export async function generateTextWithMeta(
     }
   }
 
-  // if (isDebug) {
-  //   console.warn("[llmRouter] response", {
-  //     provider,
-  //     model: resolvedModel,
-  //     durationMs: Date.now() - startedAt,
-  //     outputLength: text.length,
-  //   });
-  //   console.warn("[llmRouter] output", text);
-  // }
+  if (isDebug) {
+    console.warn("[llmRouter] response", {
+      provider,
+      model: resolvedModel,
+      durationMs: Date.now() - startedAt,
+      outputLength: text.length,
+    });
+    console.warn("[llmRouter] output", text);
+  }
 
   return {
     text,

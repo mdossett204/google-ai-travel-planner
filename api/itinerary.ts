@@ -1,10 +1,10 @@
-import crypto from "crypto";
 import {
   assertProviderApiKeysConfigured,
   generateText,
   generateTextWithMeta,
   calculateMaxToolCallsForTrip,
   type LlmProvider,
+  getProvider,
 } from "../utils/llmRouter.js";
 import { validateItineraryRequest } from "../utils/requestValidation.js";
 import { readJsonBody } from "../utils/http.js";
@@ -12,7 +12,7 @@ import { getAnthropicVerificationTools } from "../tools/anthropicTools.js";
 import { getGeminiVerificationTools } from "../tools/geminiTools.js";
 import { getOpenAIVerificationTools } from "../tools/openaiTools.js";
 import { assertTomTomApiKeyConfigured } from "../tools/tomtomSearch.js";
-import { assertRedisConfigured, getRedisClient } from "../utils/redis.js";
+import { assertRedisConfigured } from "../utils/redis.js";
 import { formatFoodPreferences } from "../utils/foodPreferences.js";
 import { formatLodgingPreferences } from "../utils/lodgingPreferences.js";
 import {
@@ -20,7 +20,18 @@ import {
   formatTravelerType,
 } from "../utils/tripContext.js";
 
-function sendJson(res: any, status: number, data: any) {
+interface ApiRequest {
+  method?: string;
+  [key: string]: unknown;
+}
+
+interface ApiResponse {
+  statusCode: number;
+  setHeader(name: string, value: string): void;
+  end(data?: string): void;
+}
+
+function sendJson(res: ApiResponse, status: number, data: unknown) {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.setHeader("X-Content-Type-Options", "nosniff");
@@ -43,8 +54,8 @@ const monthLabels: Record<string, string> = {
   Dec: "December (winter)",
 };
 
-function sanitize(str: any) {
-  return String(str || "").replace(/[<>]/g, (c) =>
+function sanitize(str: unknown): string {
+  return String(str ?? "").replace(/[<>]/g, (c) =>
     c === "<" ? "&lt;" : "&gt;",
   );
 }
@@ -83,7 +94,7 @@ function getItineraryVerificationConfig(): {
   };
 }
 
-export default async function handler(req: any, res: any) {
+export default async function handler(req: ApiRequest, res: ApiResponse) {
   if (req.method === "OPTIONS") {
     res.statusCode = 204;
     return res.end();
@@ -93,8 +104,12 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
+    const draftProvider = getProvider();
     const verificationConfig = getItineraryVerificationConfig();
-    assertProviderApiKeysConfigured(["gemini", verificationConfig.provider]);
+    assertProviderApiKeysConfigured([
+      draftProvider,
+      verificationConfig.provider,
+    ]);
     assertTomTomApiKeyConfigured();
     assertRedisConfigured();
 
@@ -249,25 +264,6 @@ export default async function handler(req: any, res: any) {
       isFoodMajorTripFocus: shouldVerifyFoodPlaces,
     });
 
-    const cachePayload = {
-      version: 3,
-      data,
-      recommendation,
-    };
-    const cacheKey =
-      "itinerary:" +
-      crypto
-        .createHash("sha256")
-        .update(JSON.stringify(cachePayload))
-        .digest("hex");
-    const redis = await getRedisClient();
-    try {
-      const cached = await redis.get(cacheKey);
-      if (cached) return sendJson(res, 200, { itinerary: cached });
-    } catch (err) {
-      console.warn("[itinerary] Redis read error", err);
-    }
-
     const draftSystemInstruction =
       "You are an elite travel concierge focused on drafting realistic trip plans before final verification. Use general destination knowledge only, avoid web search, and do not include exact addresses, URLs, or opening hours. Favor realistic pacing, geographic coherence, transportation practicality, and budget realism. Never invent precise facts to make a recommendation sound more certain than it is.";
 
@@ -396,8 +392,7 @@ export default async function handler(req: any, res: any) {
   `;
 
     const draftPlan = await generateText({
-      provider: "gemini",
-      model: "gemini-2.5-flash",
+      provider: draftProvider,
       prompt: draftPrompt,
       systemInstruction: draftSystemInstruction,
       useSearchTool: false,
@@ -595,41 +590,38 @@ export default async function handler(req: any, res: any) {
     const verifiedItinerary = verificationResult.text.trim();
     const finalItinerary = verifiedItinerary || draftPlan;
 
-    if (verifiedItinerary && !verificationResult.usedFallback) {
-      redis
-        .set(cacheKey, verifiedItinerary, {
-          EX: 86400 * 7, // Cache successfully verified trips for 7 days
-        })
-        .catch((err) => console.warn("[itinerary] Redis write error", err));
-    }
-
     return sendJson(res, 200, {
       itinerary: finalItinerary,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error(err);
-    if (err?.name === "RequestValidationError") {
-      return sendJson(res, 400, { error: err.message });
+    const name =
+      err instanceof Error ? err.name : (err as Record<string, unknown>)?.name;
+    const message =
+      err instanceof Error
+        ? err.message
+        : (err as Record<string, unknown>)?.message;
+    const status = (err as Record<string, unknown>)?.status;
+
+    if (name === "RequestValidationError") {
+      return sendJson(res, 400, { error: message });
     }
-    if (err?.name === "InvalidJsonBodyError") {
-      return sendJson(res, 400, { error: err.message });
+    if (name === "InvalidJsonBodyError") {
+      return sendJson(res, 400, { error: message });
     }
-    if (err?.name === "RequestBodyTooLargeError") {
-      return sendJson(res, 413, { error: err.message });
+    if (name === "RequestBodyTooLargeError") {
+      return sendJson(res, 413, { error: message });
     }
-    if (err?.name === "LlmConfigurationError") {
-      return sendJson(res, 500, { error: err.message });
+    if (name === "LlmConfigurationError") {
+      return sendJson(res, 500, { error: message });
     }
-    if (err?.name === "TomTomConfigurationError") {
-      return sendJson(res, 500, { error: err.message });
+    if (name === "TomTomConfigurationError") {
+      return sendJson(res, 500, { error: message });
     }
-    if (
-      err?.name === "RedisConfigurationError" ||
-      err?.name === "RedisConnectionError"
-    ) {
-      return sendJson(res, 500, { error: err.message });
+    if (name === "RedisConfigurationError" || name === "RedisConnectionError") {
+      return sendJson(res, 500, { error: message });
     }
-    if (err?.status === 429 || err?.message?.includes("rate limit")) {
+    if (status === 429 || String(message).includes("rate limit")) {
       return sendJson(res, 429, {
         error: "Our AI is currently busy. Please wait a moment and try again!",
       });
