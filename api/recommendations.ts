@@ -15,46 +15,14 @@ import {
   formatPreferredLocation,
   formatTravelerType,
 } from "../utils/tripContext.js";
-
-interface ApiRequest {
-  method?: string;
-  [key: string]: unknown;
-}
-
-interface ApiResponse {
-  statusCode: number;
-  setHeader(name: string, value: string): void;
-  end(data?: string): void;
-}
-
-function sendJson(res: ApiResponse, status: number, data: unknown) {
-  res.statusCode = status;
-  res.setHeader("Content-Type", "application/json; charset=utf-8");
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader("Cache-Control", "no-store");
-  res.end(JSON.stringify(data));
-}
-
-const monthLabels: Record<string, string> = {
-  Jan: "January (winter)",
-  Feb: "February (late winter)",
-  Mar: "March (early spring)",
-  Apr: "April (early spring)",
-  May: "May (spring)",
-  Jun: "June (early summer)",
-  Jul: "July (midsummer)",
-  Aug: "August (late summer)",
-  Sep: "September (early fall)",
-  Oct: "October (fall)",
-  Nov: "November (late fall)",
-  Dec: "December (winter)",
-};
-
-function sanitize(str: unknown): string {
-  return String(str ?? "").replace(/[<>]/g, (c) =>
-    c === "<" ? "&lt;" : "&gt;",
-  );
-}
+import {
+  handleApiError,
+  monthLabels,
+  sanitizePromptInput,
+  sendJson,
+  type ApiRequest,
+  type ApiResponse,
+} from "../utils/apiHelpers.js";
 
 export default async function handler(req: ApiRequest, res: ApiResponse) {
   if (req.method === "OPTIONS") {
@@ -104,19 +72,19 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
     USER PREFERENCES
     Time of Year: ${timeOfYear}
-    Duration: ${durationValue} ${sanitize(data.durationUnit)}
+    Duration: ${durationValue} ${sanitizePromptInput(data.durationUnit)}
     Travel Style: ${travelerType}
     Budget (Treat as upper limit, with +/- 20% flexibility only when clearly justified):
       - Lodging: ${data.includeLodging ? `$${data.budget?.lodging ?? "Any"} per night` : "Not requested (ignore lodging)"}
       - Local Transportation at Destination: $${data.budget?.localTransportation ?? "Any"} total
       - Food: ${data.includeFood ? `$${data.budget?.food ?? "Any"} per day` : "Not requested (ignore food)"}
       - Miscellaneous/Activities: $${data.budget?.misc ?? "Any"} total
-    Primary Goal(s): <goals>${data.primaryGoal?.length > 0 ? sanitize(data.primaryGoal.join(", ")) : "Any"}</goals>
+    Primary Goal(s): <goals>${data.primaryGoal?.length > 0 ? sanitizePromptInput(data.primaryGoal.join(", ")) : "Any"}</goals>
     ${data.includeFood ? `FOOD PREFERENCES\n    ${foodPreferences}` : "FOOD: Not requested"}
     ${data.includeLodging ? `\n    LODGING PREFERENCES\n    ${lodgingPreferences}` : "\n    LODGING: Not requested"}
-    Local Transportation Preferences: ${data.localTransportation?.length > 0 ? data.localTransportation.join(", ") : "Any"}
+    Local Transportation Preferences: ${data.localTransportation?.length > 0 ? sanitizePromptInput(data.localTransportation.join(", ")) : "Any"}
     Preferred Location: ${preferredLocation}
-    Attractions of Interest: <attractions>${sanitize(data.attractionInterests) || "None specified"}</attractions>
+    Attractions of Interest: <attractions>${sanitizePromptInput(data.attractionInterests) || "None specified"}</attractions>
 
     DECISION RULES
     ${locationRules}
@@ -250,35 +218,6 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
     return sendJson(res, 200, parsed);
   } catch (err: unknown) {
-    console.error(err);
-    const name =
-      err instanceof Error ? err.name : (err as Record<string, unknown>)?.name;
-    const message =
-      err instanceof Error
-        ? err.message
-        : (err as Record<string, unknown>)?.message;
-    const status = (err as Record<string, unknown>)?.status;
-
-    if (name === "RequestValidationError") {
-      return sendJson(res, 400, { error: message });
-    }
-    if (name === "InvalidJsonBodyError") {
-      return sendJson(res, 400, { error: message });
-    }
-    if (name === "RequestBodyTooLargeError") {
-      return sendJson(res, 413, { error: message });
-    }
-    if (name === "LlmConfigurationError") {
-      return sendJson(res, 500, { error: message });
-    }
-    if (name === "RedisConfigurationError" || name === "RedisConnectionError") {
-      return sendJson(res, 500, { error: message });
-    }
-    if (status === 429 || String(message).includes("rate limit")) {
-      return sendJson(res, 429, {
-        error: "Our AI is currently busy. Please wait a moment and try again!",
-      });
-    }
-    return sendJson(res, 500, { error: "Server error" });
+    return handleApiError(res, err);
   }
 }

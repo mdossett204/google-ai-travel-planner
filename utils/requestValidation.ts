@@ -112,6 +112,22 @@ function parseOptionalStringArray(value: unknown, fieldName: string) {
   return parseStringArray(value, fieldName);
 }
 
+function parseOptionalStringEnumArray<T extends string>(
+  value: unknown,
+  fieldName: string,
+  allowedValues: readonly T[],
+) {
+  const values = parseOptionalStringArray(value, fieldName);
+  for (const item of values) {
+    if (!allowedValues.includes(item as T)) {
+      throw new RequestValidationError(
+        `${fieldName} must contain only: ${allowedValues.join(", ")}.`,
+      );
+    }
+  }
+  return values as T[];
+}
+
 function parseOptionalBoolean(
   value: unknown,
   fieldName: string,
@@ -191,7 +207,20 @@ export function validateTravelFormData(raw: unknown): ValidatedTravelFormData {
       : {};
 
   return {
-    timeOfYear: parseOptionalStringArray(input.timeOfYear, "timeOfYear"),
+    timeOfYear: parseOptionalStringEnumArray(input.timeOfYear, "timeOfYear", [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
+    ]),
     durationValue: parsePositiveNumber(input.durationValue, "durationValue"),
     durationUnit: parseStringEnum(input.durationUnit, "durationUnit", [
       "days",
@@ -261,7 +290,7 @@ export function validateTravelFormData(raw: unknown): ValidatedTravelFormData {
         "lodgingPreferences.lodgingTypes",
       ),
     },
-    localTransportation: parseStringArray(
+    localTransportation: parseOptionalStringArray(
       input.localTransportation,
       "localTransportation",
     ),
@@ -273,10 +302,9 @@ export function validateTravelFormData(raw: unknown): ValidatedTravelFormData {
           allowEmpty: false,
         },
       ),
-      stateOrProvince: parseString(
+      stateOrProvince: parseOptionalString(
         preferredLocation.stateOrProvince,
         "preferredLocation.stateOrProvince",
-        { allowEmpty: true },
       ),
       city: parseOptionalString(
         preferredLocation.city,

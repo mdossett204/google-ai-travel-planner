@@ -19,44 +19,64 @@ import {
   formatPreferredLocation,
   formatTravelerType,
 } from "../utils/tripContext.js";
+import {
+  handleApiError,
+  monthLabels,
+  sanitizePromptInput,
+  sendJson,
+  type ApiRequest,
+  type ApiResponse,
+} from "../utils/apiHelpers.js";
 
-interface ApiRequest {
-  method?: string;
-  [key: string]: unknown;
-}
+type ActivityLevel = "Relaxed" | "Balanced" | "Very Active";
 
-interface ApiResponse {
-  statusCode: number;
-  setHeader(name: string, value: string): void;
-  end(data?: string): void;
-}
-
-function sendJson(res: ApiResponse, status: number, data: unknown) {
-  res.statusCode = status;
-  res.setHeader("Content-Type", "application/json; charset=utf-8");
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader("Cache-Control", "no-store");
-  res.end(JSON.stringify(data));
-}
-
-const monthLabels: Record<string, string> = {
-  Jan: "January (winter)",
-  Feb: "February (late winter)",
-  Mar: "March (early spring)",
-  Apr: "April (early spring)",
-  May: "May (spring)",
-  Jun: "June (early summer)",
-  Jul: "July (midsummer)",
-  Aug: "August (late summer)",
-  Sep: "September (early fall)",
-  Oct: "October (fall)",
-  Nov: "November (late fall)",
-  Dec: "December (winter)",
+const pacingRulesByActivityLevel: Record<
+  ActivityLevel,
+  { draft: string[]; verify: string[] }
+> = {
+  Relaxed: {
+    draft: [
+      "- Pace target: slow and spacious. Build in downtime.",
+      "- Each day should have ~1 major activity and 1 lighter activity, plus a clear flexible/free-time block.",
+      "- Avoid early starts, long transfers, and back-to-back ticketed items when possible.",
+      "- Keep movement tight: one main area anchor per day, minimal cross-city travel.",
+    ],
+    verify: [
+      "- Respect the user's Activity Level: Relaxed.",
+      "- Keep days spacious; remove any back-to-back major stops that feel rushed.",
+      "- Prefer 1-2 major anchors/day max, and keep travel distances short.",
+    ],
+  },
+  Balanced: {
+    draft: [
+      "- Pace target: balanced. Allow some relaxation, but days can feel fairly full.",
+      "- Each day may include up to 2 major activities and 1 lighter activity.",
+      "- Keep point-to-point travel reasonable by clustering activities geographically.",
+    ],
+    verify: [
+      "- Respect the user's Activity Level: Balanced.",
+      "- Keep days fairly full but avoid unrealistic transfers or rushed sequencing.",
+    ],
+  },
+  "Very Active": {
+    draft: [
+      "- Pace target: very active and packed, but still realistic.",
+      "- Each day may include up to 3 major activities plus 1 lighter activity when geography allows.",
+      "- You MUST keep point-to-point travel reasonable (cluster by neighborhood/region; avoid zig-zagging).",
+      "- Do not stack multiple strenuous blocks back-to-back; add short recovery or transit-friendly gaps.",
+    ],
+    verify: [
+      "- Respect the user's Activity Level: Very Active.",
+      "- A packed schedule is allowed, but only if point-to-point travel remains reasonable and coherent.",
+      "- If activities are far apart, drop lower-value items rather than forcing unrealistic transfers.",
+    ],
+  },
 };
 
-function sanitize(str: unknown): string {
-  return String(str ?? "").replace(/[<>]/g, (c) =>
-    c === "<" ? "&lt;" : "&gt;",
+function getPacingRules(activityLevel: string) {
+  return (
+    pacingRulesByActivityLevel[activityLevel as ActivityLevel] ??
+    pacingRulesByActivityLevel.Balanced
   );
 }
 
@@ -171,54 +191,9 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       .join("\n    ");
 
     const activityLevel = data.activityLevel || "";
-    const draftPacingRules = (() => {
-      switch (activityLevel) {
-        case "Relaxed":
-          return [
-            "- Pace target: slow and spacious. Build in downtime.",
-            "- Each day should have ~1 major activity and 1 lighter activity, plus a clear flexible/free-time block.",
-            "- Avoid early starts, long transfers, and back-to-back ticketed items when possible.",
-            "- Keep movement tight: one main area anchor per day, minimal cross-city travel.",
-          ].join("\n    ");
-        case "Very Active":
-          return [
-            "- Pace target: very active and packed, but still realistic.",
-            "- Each day may include up to 3 major activities plus 1 lighter activity when geography allows.",
-            "- You MUST keep point-to-point travel reasonable (cluster by neighborhood/region; avoid zig-zagging).",
-            "- Do not stack multiple strenuous blocks back-to-back; add short recovery or transit-friendly gaps.",
-          ].join("\n    ");
-        case "Balanced":
-        default:
-          return [
-            "- Pace target: balanced. Allow some relaxation, but days can feel fairly full.",
-            "- Each day may include up to 2 major activities and 1 lighter activity.",
-            "- Keep point-to-point travel reasonable by clustering activities geographically.",
-          ].join("\n    ");
-      }
-    })();
-
-    const verifyPacingRules = (() => {
-      switch (activityLevel) {
-        case "Relaxed":
-          return [
-            "- Respect the user's Activity Level: Relaxed.",
-            "- Keep days spacious; remove any back-to-back major stops that feel rushed.",
-            "- Prefer 1-2 major anchors/day max, and keep travel distances short.",
-          ].join("\n    ");
-        case "Very Active":
-          return [
-            "- Respect the user's Activity Level: Very Active.",
-            "- A packed schedule is allowed, but only if point-to-point travel remains reasonable and coherent.",
-            "- If activities are far apart, drop lower-value items rather than forcing unrealistic transfers.",
-          ].join("\n    ");
-        case "Balanced":
-        default:
-          return [
-            "- Respect the user's Activity Level: Balanced.",
-            "- Keep days fairly full but avoid unrealistic transfers or rushed sequencing.",
-          ].join("\n    ");
-      }
-    })();
+    const pacingRules = getPacingRules(activityLevel);
+    const draftPacingRules = pacingRules.draft.join("\n    ");
+    const verifyPacingRules = pacingRules.verify.join("\n    ");
 
     const shouldVerifyFoodPlaces =
       data.includeFood &&
@@ -272,17 +247,17 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
     const draftPrompt = `
 	    You are the 'Trip Planner Draft Agent'.
-	    Destination: ${sanitize(recommendation.title)}
+	    Destination: ${sanitizePromptInput(recommendation.title)}
 	    Preferred Location: ${preferredLocation}
-	    Trip Context: ${sanitize(recommendation.description)}
+	    Trip Context: ${sanitizePromptInput(recommendation.description)}
 	    Time of Year: ${timeOfYear}
-	    Duration: ${durationValue} ${sanitize(data.durationUnit)}
+	    Duration: ${durationValue} ${sanitizePromptInput(data.durationUnit)}
 	    ${tripStructureNote}
 	    Travel Style: ${travelerType}
-	    Primary Goal(s): <goals>${data.primaryGoal?.length > 0 ? sanitize(data.primaryGoal.join(", ")) : "Any"}</goals>
+	    Primary Goal(s): <goals>${data.primaryGoal?.length > 0 ? sanitizePromptInput(data.primaryGoal.join(", ")) : "Any"}</goals>
 	    Activity Level: ${data.activityLevel || "Not specified"}
-	    Attractions of Interest: <attractions>${sanitize(data.attractionInterests) || "None specified"}</attractions>
-	    Local Transportation Preferences: ${data.localTransportation?.length > 0 ? data.localTransportation.join(", ") : "Any"}
+	    Attractions of Interest: <attractions>${sanitizePromptInput(data.attractionInterests) || "None specified"}</attractions>
+	    Local Transportation Preferences: ${data.localTransportation?.length > 0 ? sanitizePromptInput(data.localTransportation.join(", ")) : "Any"}
 	    Budget (Treat as upper limit, +/- 20% acceptable):
 	      - Lodging: ${data.includeLodging ? `$${data.budget?.lodging ?? "Any"} per night` : "Not requested (omit lodging)"}
 	      - Local Transportation: $${data.budget?.localTransportation ?? "Any"} total
@@ -594,38 +569,6 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       itinerary: finalItinerary,
     });
   } catch (err: unknown) {
-    console.error(err);
-    const name =
-      err instanceof Error ? err.name : (err as Record<string, unknown>)?.name;
-    const message =
-      err instanceof Error
-        ? err.message
-        : (err as Record<string, unknown>)?.message;
-    const status = (err as Record<string, unknown>)?.status;
-
-    if (name === "RequestValidationError") {
-      return sendJson(res, 400, { error: message });
-    }
-    if (name === "InvalidJsonBodyError") {
-      return sendJson(res, 400, { error: message });
-    }
-    if (name === "RequestBodyTooLargeError") {
-      return sendJson(res, 413, { error: message });
-    }
-    if (name === "LlmConfigurationError") {
-      return sendJson(res, 500, { error: message });
-    }
-    if (name === "TomTomConfigurationError") {
-      return sendJson(res, 500, { error: message });
-    }
-    if (name === "RedisConfigurationError" || name === "RedisConnectionError") {
-      return sendJson(res, 500, { error: message });
-    }
-    if (status === 429 || String(message).includes("rate limit")) {
-      return sendJson(res, 429, {
-        error: "Our AI is currently busy. Please wait a moment and try again!",
-      });
-    }
-    return sendJson(res, 500, { error: "Server error" });
+    return handleApiError(res, err);
   }
 }

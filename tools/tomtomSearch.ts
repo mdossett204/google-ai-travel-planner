@@ -1,4 +1,5 @@
 import { getRedisClient, runFixedWindowRateLimit } from "../utils/redis.js";
+import { sleep } from "../utils/apiHelpers.js";
 
 export interface TomTomSearchOptions {
   query: string;
@@ -79,9 +80,6 @@ function isDebugEnabled() {
   return process.env.DEBUG_LLM_ROUTER === "true";
 }
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function buildCacheKey({
   query,
@@ -331,7 +329,6 @@ export async function searchTomTom({
   if (isDebugEnabled()) {
     console.warn("[tomtomSearch] request", {
       query: trimmedQuery,
-      url,
     });
   }
   let results: TomTomSearchResult[] = [];

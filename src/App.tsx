@@ -167,11 +167,13 @@ function AppContent() {
 
   const handleBackToForm = () => {
     abortControllerRef.current?.abort();
+    setError(null);
     setAppState("input");
   };
 
   const handleBackToRecommendations = () => {
     abortControllerRef.current?.abort();
+    setError(null);
     setAppState("recommendations");
   };
 
@@ -217,11 +219,13 @@ function AppContent() {
           </div>
         )}
 
-        {isLoading && appState !== "input" && (
+        {isLoading && (
           <div className="fixed inset-0 bg-white/80 backdrop-blur-sm z-50 flex flex-col items-center justify-center">
             <div className="w-12 h-12 border-4 border-emerald-100 border-t-emerald-600 rounded-full animate-spin mb-4" />
             <p className="text-lg font-medium text-slate-700 animate-pulse">
-              Crafting your perfect itinerary...
+              {appState === "recommendations"
+                ? "Crafting your perfect itinerary..."
+                : "Finding your perfect destinations..."}
             </p>
           </div>
         )}

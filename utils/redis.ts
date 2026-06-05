@@ -21,10 +21,10 @@ interface RedisClientLike {
     value: string,
     options?: {
       EX?: number;
+      NX?: boolean;
     },
   ): Promise<unknown>;
   incr(key: string): Promise<number | `${number}`>;
-  expire(key: string, seconds: number): Promise<number | `${number}`>;
 }
 
 type MemoryEntry = {
@@ -70,6 +70,10 @@ const localRedisClient: RedisClientLike = {
     return pruneExpiredEntry(key)?.value ?? null;
   },
   async set(key, value, options) {
+    if (options?.NX && pruneExpiredEntry(key)) {
+      return null;
+    }
+
     memoryStore.set(key, {
       value,
       expiresAt: getMemoryExpiration(options?.EX),
@@ -84,15 +88,6 @@ const localRedisClient: RedisClientLike = {
       expiresAt: entry?.expiresAt ?? null,
     });
     return nextValue;
-  },
-  async expire(key, seconds) {
-    const entry = pruneExpiredEntry(key);
-    if (!entry) return 0;
-    memoryStore.set(key, {
-      value: entry.value,
-      expiresAt: getMemoryExpiration(seconds),
-    });
-    return 1;
   },
 };
 
@@ -160,10 +155,14 @@ export async function runFixedWindowRateLimit(
   const currentWindow = Math.floor(Date.now() / (windowSec * 1000));
   const redisKey = `ratelimit:${key}:${currentWindow}`;
 
-  const requests = Number(await client.incr(redisKey));
-  if (requests === 1) {
-    await client.expire(redisKey, windowSec * 2);
+  const initialized = await client.set(redisKey, "1", {
+    EX: windowSec * 2,
+    NX: true,
+  });
+  if (initialized) {
+    return 1 <= limit;
   }
 
+  const requests = Number(await client.incr(redisKey));
   return requests <= limit;
 }

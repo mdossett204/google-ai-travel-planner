@@ -8,3 +8,10 @@ coverage/
 !.env.example
 .vercel
 .env*.local
+
+#local scripts
+*scripts*
+
+# local config files
+*antigravitycli*
+*vscode*

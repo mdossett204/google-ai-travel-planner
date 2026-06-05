@@ -1,3 +1,5 @@
+import { sanitizePromptInput } from "./apiHelpers.js";
+
 interface PreferredLocationInput {
   country?: string;
   stateOrProvince?: string;
@@ -5,9 +7,9 @@ interface PreferredLocationInput {
 }
 
 export function formatPreferredLocation(input: PreferredLocationInput): string {
-  const parts = [input?.city, input?.stateOrProvince, input?.country].filter(
-    Boolean,
-  );
+  const parts = [input?.city, input?.stateOrProvince, input?.country]
+    .filter(Boolean)
+    .map(sanitizePromptInput);
 
   return parts.length > 0 ? parts.join(", ") : "Not specified";
 }

@@ -8,6 +8,7 @@ import {
 import { executeOpenAITool } from "../tools/openaiTools.js";
 import { executeAnthropicTool } from "../tools/anthropicTools.js";
 import { runFixedWindowRateLimit } from "./redis.js";
+import { sleep } from "./apiHelpers.js";
 
 export type LlmProvider = "openai" | "anthropic" | "gemini";
 
@@ -43,9 +44,6 @@ interface GeminiFunctionCall {
   args?: Record<string, unknown>;
 }
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 async function waitForGeminiSlot() {
   const success = await runFixedWindowRateLimit(

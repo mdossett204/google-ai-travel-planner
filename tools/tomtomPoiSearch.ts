@@ -2,16 +2,14 @@ import { assertTomTomApiKeyConfigured, searchTomTom } from "./tomtomSearch.js";
 import { readJsonBody } from "../utils/http.js";
 import { validateTomTomPoiSearchRequest } from "../utils/requestValidation.js";
 import { assertRedisConfigured } from "../utils/redis.js";
+import {
+  handleApiError,
+  sendJson,
+  type ApiRequest,
+  type ApiResponse,
+} from "../utils/apiHelpers.js";
 
-function sendJson(res: any, status: number, data: any) {
-  res.statusCode = status;
-  res.setHeader("Content-Type", "application/json; charset=utf-8");
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader("Cache-Control", "no-store");
-  res.end(JSON.stringify(data));
-}
-
-export default async function handler(req: any, res: any) {
+export default async function handler(req: ApiRequest, res: ApiResponse) {
   if (req.method === "OPTIONS") {
     res.statusCode = 204;
     return res.end();
@@ -35,26 +33,7 @@ export default async function handler(req: any, res: any) {
     });
 
     return sendJson(res, 200, { results });
-  } catch (err: any) {
-    console.error(err);
-    if (err?.name === "RequestValidationError") {
-      return sendJson(res, 400, { error: err.message });
-    }
-    if (err?.name === "InvalidJsonBodyError") {
-      return sendJson(res, 400, { error: err.message });
-    }
-    if (err?.name === "RequestBodyTooLargeError") {
-      return sendJson(res, 413, { error: err.message });
-    }
-    if (err?.name === "TomTomConfigurationError") {
-      return sendJson(res, 500, { error: err.message });
-    }
-    if (
-      err?.name === "RedisConfigurationError" ||
-      err?.name === "RedisConnectionError"
-    ) {
-      return sendJson(res, 500, { error: err.message });
-    }
-    return sendJson(res, 500, { error: "Server error" });
+  } catch (err: unknown) {
+    return handleApiError(res, err);
   }
 }
