@@ -24,8 +24,15 @@ export const monthLabels: Record<string, string> = {
   Dec: "December (winter)",
 };
 
-export function sanitizePromptInput(value: unknown): string {
+export function formatTimeOfYear(months: string[], fallback = "Not specified"): string {
+  return months?.length > 0
+    ? months.map((month) => monthLabels[month] || month).join(", ")
+    : fallback;
+}
+
+export function sanitizePromptInput(value: unknown, maxLength = 500): string {
   return String(value ?? "")
+    .slice(0, maxLength)
     .replace(/\r\n?|\n/g, " ")
     .replace(/[<>]/g, (char) => (char === "<" ? "&lt;" : "&gt;"))
     .replace(/`{2,}/g, "`")
@@ -71,7 +78,10 @@ export function handleApiError(res: ApiResponse, err: unknown) {
     name === "RedisConfigurationError" ||
     name === "RedisConnectionError"
   ) {
-    return sendJson(res, 500, { error: message });
+    console.error(`[config] ${name}:`, message);
+    return sendJson(res, 500, {
+      error: "Server configuration error. Please try again later.",
+    });
   }
   if (status === 429 || String(message).includes("rate limit")) {
     return sendJson(res, 429, {

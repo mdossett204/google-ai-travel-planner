@@ -28,3 +28,12 @@ export function formatTravelerType(travelerType?: string): string {
       return travelerType || "Not specified";
   }
 }
+
+/**
+ * Returns the number of full on-location days for a trip.
+ * Travel typically takes half a day, so on-location days = durationDays - 1.
+ * Minimum of 1 so that even a 1-day trip has at least one real activity day.
+ */
+export function getOnLocationDays(durationDays: number): number {
+  return Math.max(durationDays - 1, 1);
+}

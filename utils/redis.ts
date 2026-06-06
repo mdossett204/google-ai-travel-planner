@@ -61,9 +61,6 @@ function logLocalFallback(reason: string) {
   );
 }
 
-function shouldUseLocalRedisFallback() {
-  return isLocalDevelopment;
-}
 
 const localRedisClient: RedisClientLike = {
   async get(key) {
@@ -96,7 +93,7 @@ const redisClient =
 
 if (redisClient) {
   redisClient.on("error", (err: unknown) => {
-    if (shouldUseLocalRedisFallback()) {
+    if (isLocalDevelopment) {
       console.warn("Redis error:", err);
       return;
     }
@@ -105,7 +102,7 @@ if (redisClient) {
 }
 
 export function assertRedisConfigured() {
-  if (shouldUseLocalRedisFallback() && hasPlaceholderRedisUrl) {
+  if (isLocalDevelopment && hasPlaceholderRedisUrl) {
     return;
   }
 
@@ -120,7 +117,7 @@ export async function getRedisClient(): Promise<RedisClientLike> {
   assertRedisConfigured();
 
   if (!redisClient) {
-    if (shouldUseLocalRedisFallback()) {
+    if (isLocalDevelopment) {
       logLocalFallback("REDIS_URL is missing or uses the placeholder value.");
       return localRedisClient;
     }
@@ -136,7 +133,7 @@ export async function getRedisClient(): Promise<RedisClientLike> {
     }
     return redisClient;
   } catch (err) {
-    if (shouldUseLocalRedisFallback()) {
+    if (isLocalDevelopment) {
       logLocalFallback("Redis is unavailable.");
       return localRedisClient;
     }

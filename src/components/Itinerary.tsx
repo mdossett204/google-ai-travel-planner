@@ -72,7 +72,7 @@ export default function Itinerary({
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8 md:p-12">
         <div className="prose prose-slate prose-emerald max-w-none">
-          <Markdown>{itinerary}</Markdown>
+          <Markdown urlTransform={(url) => url.startsWith("javascript:") ? "" : url}>{itinerary}</Markdown>
         </div>
       </div>
     </div>

@@ -64,6 +64,73 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+const ALLOWED_PRIMARY_GOALS = [
+  "Relaxation",
+  "Adventure",
+  "Hiking",
+  "Cultural Exploration",
+  "Nature & Wildlife",
+  "Food & Culinary",
+  "Party & Nightlife",
+] as const;
+
+const ALLOWED_TRANSPORT_OPTIONS = [
+  "Public Transit",
+  "Rental Car",
+  "Walking/Biking",
+  "Taxis/Rideshare",
+  "Own Car",
+] as const;
+
+const ALLOWED_DIETARY_RESTRICTIONS = [
+  "Vegan",
+  "Vegetarian",
+  "Gluten-Free",
+  "Dairy-Free",
+  "Nut-Free",
+  "Halal",
+  "Kosher",
+  "Paleo",
+  "Carnivore",
+  "No Restrictions",
+] as const;
+
+const ALLOWED_CUISINE_INTERESTS = [
+  "Seafood",
+  "Regional Specialties",
+  "Ethnic",
+  "Street Food",
+  "Cafe/Bakery",
+  "No Preference",
+] as const;
+
+const ALLOWED_DINING_STYLES = [
+  "Casual",
+  "Quick Meals",
+  "Family-Friendly",
+  "Scenic Dining",
+  "Fine Dining",
+] as const;
+
+const ALLOWED_FOOD_PLACE_TYPES = [
+  "Restaurants",
+  "Cafes/Bakeries",
+  "Grocery Stores",
+] as const;
+
+const ALLOWED_LODGING_TYPES = [
+  "Hotel",
+  "Boutique Hotel",
+  "Vacation Rental",
+  "Bed & Breakfast",
+  "Resort",
+  "Hostel",
+] as const;
+
+const MAX_BUDGET = 20000;
+const MAX_DURATION_VALUE = 14;
+const MAX_TOMTOM_LIMIT = 20;
+
 function requireRecord(value: unknown, fieldName: string) {
   if (!isRecord(value)) {
     throw new RequestValidationError(`${fieldName} must be an object.`);
@@ -154,23 +221,34 @@ function parseStringEnum<T extends string>(
   return value as T;
 }
 
-function parsePositiveNumber(value: unknown, fieldName: string) {
+function parsePositiveNumber(
+  value: unknown,
+  fieldName: string,
+  { max }: { max?: number } = {},
+) {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
     throw new RequestValidationError(`${fieldName} must be a positive number.`);
   }
-
+  if (max !== undefined && value > max) {
+    throw new RequestValidationError(`${fieldName} cannot exceed ${max}.`);
+  }
   return value;
 }
 
-function parseOptionalNumber(value: unknown, fieldName: string) {
+function parseOptionalNumber(
+  value: unknown,
+  fieldName: string,
+  { max }: { max?: number } = {},
+) {
   if (typeof value === "undefined" || value === "" || value === null) {
     return undefined;
   }
-
   if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new RequestValidationError(`${fieldName} must be a number.`);
   }
-
+  if (max !== undefined && value > max) {
+    throw new RequestValidationError(`${fieldName} cannot exceed ${max}.`);
+  }
   return value;
 }
 
@@ -221,7 +299,9 @@ export function validateTravelFormData(raw: unknown): ValidatedTravelFormData {
       "Nov",
       "Dec",
     ]),
-    durationValue: parsePositiveNumber(input.durationValue, "durationValue"),
+    durationValue: parsePositiveNumber(input.durationValue, "durationValue", {
+      max: MAX_DURATION_VALUE,
+    }),
     durationUnit: parseStringEnum(input.durationUnit, "durationUnit", [
       "days",
       "weeks",
@@ -244,31 +324,40 @@ export function validateTravelFormData(raw: unknown): ValidatedTravelFormData {
             "",
           ]),
     budget: {
-      lodging: parseOptionalNumber(budget.lodging, "budget.lodging"),
+      lodging: parseOptionalNumber(budget.lodging, "budget.lodging", { max: MAX_BUDGET }),
       localTransportation: parseOptionalNumber(
         budget.localTransportation,
         "budget.localTransportation",
+        { max: MAX_BUDGET },
       ),
-      food: parseOptionalNumber(budget.food, "budget.food"),
-      misc: parseOptionalNumber(budget.misc, "budget.misc"),
+      food: parseOptionalNumber(budget.food, "budget.food", { max: MAX_BUDGET }),
+      misc: parseOptionalNumber(budget.misc, "budget.misc", { max: MAX_BUDGET }),
     },
-    primaryGoal: parseStringArray(input.primaryGoal, "primaryGoal"),
+    primaryGoal: parseOptionalStringEnumArray(
+      input.primaryGoal,
+      "primaryGoal",
+      ALLOWED_PRIMARY_GOALS,
+    ),
     foodPreferences: {
-      dietaryRestrictions: parseOptionalStringArray(
+      dietaryRestrictions: parseOptionalStringEnumArray(
         foodPreferences.dietaryRestrictions,
         "foodPreferences.dietaryRestrictions",
+        ALLOWED_DIETARY_RESTRICTIONS,
       ),
-      cuisineInterests: parseOptionalStringArray(
+      cuisineInterests: parseOptionalStringEnumArray(
         foodPreferences.cuisineInterests,
         "foodPreferences.cuisineInterests",
+        ALLOWED_CUISINE_INTERESTS,
       ),
-      diningStyle: parseOptionalStringArray(
+      diningStyle: parseOptionalStringEnumArray(
         foodPreferences.diningStyle,
         "foodPreferences.diningStyle",
+        ALLOWED_DINING_STYLES,
       ),
-      foodPlaceTypes: parseOptionalStringArray(
+      foodPlaceTypes: parseOptionalStringEnumArray(
         foodPreferences.foodPlaceTypes,
         "foodPreferences.foodPlaceTypes",
+        ALLOWED_FOOD_PLACE_TYPES,
       ),
       foodPriority: includeFood
         ? parseStringEnum(
@@ -285,14 +374,16 @@ export function validateTravelFormData(raw: unknown): ValidatedTravelFormData {
             ),
     },
     lodgingPreferences: {
-      lodgingTypes: parseOptionalStringArray(
+      lodgingTypes: parseOptionalStringEnumArray(
         lodgingPreferences.lodgingTypes,
         "lodgingPreferences.lodgingTypes",
+        ALLOWED_LODGING_TYPES,
       ),
     },
-    localTransportation: parseOptionalStringArray(
+    localTransportation: parseOptionalStringEnumArray(
       input.localTransportation,
       "localTransportation",
+      ALLOWED_TRANSPORT_OPTIONS,
     ),
     preferredLocation: {
       country: parseString(
@@ -395,6 +486,9 @@ export function validateTomTomPoiSearchRequest(
 
   if (!limitRaw || limitRaw <= 0) {
     throw new RequestValidationError("limit must be a positive number.");
+  }
+  if (limitRaw > MAX_TOMTOM_LIMIT) {
+    throw new RequestValidationError(`limit cannot exceed ${MAX_TOMTOM_LIMIT}.`);
   }
   const limit: number = limitRaw;
 

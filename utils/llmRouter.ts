@@ -9,6 +9,7 @@ import { executeOpenAITool } from "../tools/openaiTools.js";
 import { executeAnthropicTool } from "../tools/anthropicTools.js";
 import { runFixedWindowRateLimit } from "./redis.js";
 import { sleep } from "./apiHelpers.js";
+import { getOnLocationDays } from "./tripContext.js";
 
 export type LlmProvider = "openai" | "anthropic" | "gemini";
 
@@ -25,13 +26,9 @@ const MAX_TOOL_ITERATIONS = 4;
 const LLM_MAX_RETRIES = 3;
 const LLM_RETRY_BASE_DELAY_MS = 1500;
 const DEFAULT_ANTHROPIC_MAX_TOKENS = 8192;
-const GEMINI_MIN_INTERVAL_MS = 6000;
 const GLOBAL_LLM_RATE_LIMIT_KEY = "llm-call-global-limit";
 const GLOBAL_LLM_RATE_LIMIT = 15;
 const GLOBAL_LLM_RATE_LIMIT_WINDOW_SEC = 60;
-
-let lastGeminiRequestAt = 0;
-let geminiQueue: Promise<void> = Promise.resolve();
 
 const clients: {
   openai?: OpenAI;
@@ -45,43 +42,7 @@ interface GeminiFunctionCall {
 }
 
 
-async function waitForGeminiSlot() {
-  const success = await runFixedWindowRateLimit(
-    GLOBAL_LLM_RATE_LIMIT_KEY,
-    GLOBAL_LLM_RATE_LIMIT,
-    GLOBAL_LLM_RATE_LIMIT_WINDOW_SEC,
-  );
-  if (!success) {
-    throw Object.assign(new Error("Global rate limit exceeded"), {
-      status: 429,
-    });
-  }
-
-  const previous = geminiQueue;
-  let release!: () => void;
-
-  geminiQueue = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-
-  await previous;
-
-  const elapsed = Date.now() - lastGeminiRequestAt;
-  const waitMs = Math.max(0, GEMINI_MIN_INTERVAL_MS - elapsed);
-  if (waitMs > 0) {
-    await sleep(waitMs);
-  }
-
-  lastGeminiRequestAt = Date.now();
-  release();
-}
-
-async function waitForLlmRequestSlot(provider: LlmProvider) {
-  if (provider === "gemini") {
-    await waitForGeminiSlot();
-    return;
-  }
-
+async function waitForLlmRequestSlot() {
   const success = await runFixedWindowRateLimit(
     GLOBAL_LLM_RATE_LIMIT_KEY,
     GLOBAL_LLM_RATE_LIMIT,
@@ -207,6 +168,40 @@ function getToolLimitFallbackPrompt(provider: string, maxToolCalls: number) {
   return `Tool use has reached the limit (${maxToolCalls}) for ${provider}. ${TOOL_LIMIT_FALLBACK_PROMPT}`;
 }
 
+function buildFallbackContent(providerLabel?: string, maxToolCalls?: number): string {
+  return providerLabel != null && maxToolCalls != null
+    ? getToolLimitFallbackPrompt(providerLabel, maxToolCalls)
+    : TOOL_LIMIT_FALLBACK_PROMPT;
+}
+
+function appendFallbackToMessages(messages: any[], content: string): any[] {
+  const finalMessages = [...messages];
+  const last = finalMessages[finalMessages.length - 1];
+  if (last && last.role === "user") {
+    const newContent = Array.isArray(last.content)
+      ? [...last.content, { type: "text", text: content }]
+      : `${last.content}\n\n${content}`;
+    finalMessages[finalMessages.length - 1] = { ...last, content: newContent };
+  } else {
+    finalMessages.push({ role: "user", content });
+  }
+  return finalMessages;
+}
+
+function appendFallbackToContents(contents: any[], content: string): any[] {
+  const finalContents = [...contents];
+  const last = finalContents[finalContents.length - 1];
+  if (last && last.role === "user") {
+    finalContents[finalContents.length - 1] = {
+      ...last,
+      parts: [...(last.parts || []), { text: content }],
+    };
+  } else {
+    finalContents.push({ role: "user", parts: [{ text: content }] });
+  }
+  return finalContents;
+}
+
 async function finalizeOpenAIWithoutTools({
   openai,
   model,
@@ -222,39 +217,19 @@ async function finalizeOpenAIWithoutTools({
   maxToolCalls?: number;
   isDebug: boolean;
 }) {
-  const content =
-    providerLabel && maxToolCalls
-      ? getToolLimitFallbackPrompt(providerLabel, maxToolCalls)
-      : TOOL_LIMIT_FALLBACK_PROMPT;
-
-  const lastMessage = messages[messages.length - 1];
-  const finalMessages = [...messages];
-
-  if (lastMessage && lastMessage.role === "user") {
-    const newContent = Array.isArray(lastMessage.content)
-      ? [...lastMessage.content, { type: "text", text: content }]
-      : `${lastMessage.content}\n\n${content}`;
-    finalMessages[finalMessages.length - 1] = {
-      ...lastMessage,
-      content: newContent as any,
-    };
-  } else {
-    finalMessages.push({ role: "user", content });
-  }
-
+  const finalMessages = appendFallbackToMessages(
+    messages,
+    buildFallbackContent(providerLabel, maxToolCalls),
+  );
   const response = await withLlmRetry({
     provider: "openai",
     model,
     isDebug,
     fn: async () => {
-      await waitForLlmRequestSlot("openai");
-      return openai.chat.completions.create({
-        model,
-        messages: finalMessages as any,
-      });
+      await waitForLlmRequestSlot();
+      return openai.chat.completions.create({ model, messages: finalMessages });
     },
   });
-
   return normalizeText(response.choices[0]?.message?.content || "");
 }
 
@@ -275,11 +250,6 @@ async function finalizeAnthropicWithoutTools({
   reason?: "tool-limit-hit" | "iteration-limit-hit" | "loop-finalize";
   isDebug: boolean;
 }) {
-  const content =
-    providerLabel && maxToolCalls
-      ? getToolLimitFallbackPrompt(providerLabel, maxToolCalls)
-      : TOOL_LIMIT_FALLBACK_PROMPT;
-
   if (isDebug) {
     console.warn("[llmRouter] anthropic-finalize-without-tools", {
       model,
@@ -289,36 +259,19 @@ async function finalizeAnthropicWithoutTools({
       reason: reason || "loop-finalize",
     });
   }
-
-  const lastMessage = messages[messages.length - 1];
-  const finalMessages = [...messages];
-
-  if (lastMessage && lastMessage.role === "user") {
-    const newContent = Array.isArray(lastMessage.content)
-      ? [...lastMessage.content, { type: "text", text: content }]
-      : `${lastMessage.content}\n\n${content}`;
-    finalMessages[finalMessages.length - 1] = {
-      ...lastMessage,
-      content: newContent as any,
-    };
-  } else {
-    finalMessages.push({ role: "user", content });
-  }
-
+  const finalMessages = appendFallbackToMessages(
+    messages,
+    buildFallbackContent(providerLabel, maxToolCalls),
+  );
   const msg = await withLlmRetry({
     provider: "anthropic",
     model,
     isDebug,
     fn: async () => {
-      await waitForLlmRequestSlot("anthropic");
-      return anthropic.messages.create({
-        model,
-        max_tokens: ANTHROPIC_MAX_TOKENS,
-        messages: finalMessages as any,
-      });
+      await waitForLlmRequestSlot();
+      return anthropic.messages.create({ model, max_tokens: ANTHROPIC_MAX_TOKENS, messages: finalMessages });
     },
   });
-
   return normalizeText(msg);
 }
 
@@ -339,40 +292,19 @@ async function finalizeGeminiWithoutTools({
   maxToolCalls?: number;
   isDebug: boolean;
 }) {
-  const content =
-    providerLabel && maxToolCalls
-      ? getToolLimitFallbackPrompt(providerLabel, maxToolCalls)
-      : TOOL_LIMIT_FALLBACK_PROMPT;
-
-  const lastContent = contents[contents.length - 1];
-  const finalContents = [...contents];
-
-  if (lastContent && lastContent.role === "user") {
-    const newParts = [...(lastContent.parts || []), { text: content }];
-    finalContents[finalContents.length - 1] = {
-      ...lastContent,
-      parts: newParts,
-    };
-  } else {
-    finalContents.push({ role: "user", parts: [{ text: content }] });
-  }
-
+  const finalContents = appendFallbackToContents(
+    contents,
+    buildFallbackContent(providerLabel, maxToolCalls),
+  );
   const response = await withLlmRetry({
     provider: "gemini",
     model,
     isDebug,
     fn: async () => {
-      await waitForLlmRequestSlot("gemini");
-      return gemini.models.generateContent({
-        model,
-        contents: finalContents,
-        config: {
-          systemInstruction,
-        },
-      });
+      await waitForLlmRequestSlot();
+      return gemini.models.generateContent({ model, contents: finalContents, config: { systemInstruction } });
     },
   });
-
   return normalizeText(response.text || "");
 }
 
@@ -407,7 +339,7 @@ export type ToolBudgetInputs = {
 };
 
 export function calculateMaxToolCallsForTrip(inputs: ToolBudgetInputs): number {
-  const onLocationDays = Math.max(inputs.durationDays - 2, 0);
+  const onLocationDays = Math.max(getOnLocationDays(inputs.durationDays), 5);
   const dailyLocations =
     inputs.activityLevel === "Very Active"
       ? 4
@@ -472,7 +404,7 @@ export async function generateTextWithMeta(
         model: resolvedModel,
         isDebug,
         fn: async () => {
-          await waitForLlmRequestSlot("openai");
+          await waitForLlmRequestSlot();
           return openai.chat.completions.create({
             model: resolvedModel,
             messages,
@@ -489,7 +421,7 @@ export async function generateTextWithMeta(
           model: resolvedModel,
           isDebug,
           fn: async () => {
-            await waitForLlmRequestSlot("openai");
+            await waitForLlmRequestSlot();
             return openai.chat.completions.create({
               model: resolvedModel,
               tools: openaiTools,
@@ -602,7 +534,7 @@ export async function generateTextWithMeta(
         model: resolvedModel,
         isDebug,
         fn: async () => {
-          await waitForLlmRequestSlot("anthropic");
+          await waitForLlmRequestSlot();
           return anthropic.messages.create({
             model: resolvedModel,
             max_tokens: ANTHROPIC_MAX_TOKENS,
@@ -624,7 +556,7 @@ export async function generateTextWithMeta(
           model: resolvedModel,
           isDebug,
           fn: async () => {
-            await waitForLlmRequestSlot("anthropic");
+            await waitForLlmRequestSlot();
             return anthropic.messages.create({
               model: resolvedModel,
               max_tokens: ANTHROPIC_MAX_TOKENS,
@@ -651,20 +583,12 @@ export async function generateTextWithMeta(
           break;
         }
 
-        totalToolCalls += toolUses.length;
-        if (isDebug) {
-          console.warn("[llmRouter] anthropic-tool-calls", {
-            iteration: attempt + 1,
-            toolCallsThisIteration: toolUses.length,
-            totalToolCalls,
-            toolNames: toolUses.map((item) => item.name),
-          });
-        }
-        if (totalToolCalls > maxToolCalls) {
+        const nextTotalToolCalls = totalToolCalls + toolUses.length;
+        if (nextTotalToolCalls > maxToolCalls) {
           if (isDebug) {
             console.warn("[llmRouter] anthropic-tool-call-limit-hit", {
               iteration: attempt + 1,
-              totalToolCalls,
+              totalToolCalls: nextTotalToolCalls,
               maxToolCalls,
             });
           }
@@ -679,6 +603,16 @@ export async function generateTextWithMeta(
             isDebug,
           });
           break;
+        }
+
+        totalToolCalls = nextTotalToolCalls;
+        if (isDebug) {
+          console.warn("[llmRouter] anthropic-tool-calls", {
+            iteration: attempt + 1,
+            toolCallsThisIteration: toolUses.length,
+            totalToolCalls,
+            toolNames: toolUses.map((item) => item.name),
+          });
         }
 
         const toolResultBlocks: Anthropic.ToolResultBlockParam[] = [];
@@ -755,7 +689,7 @@ export async function generateTextWithMeta(
         model: resolvedModel,
         isDebug,
         fn: async () => {
-          await waitForLlmRequestSlot("gemini");
+          await waitForLlmRequestSlot();
           return gemini.models.generateContent({
             model: resolvedModel,
             contents: opts.prompt,
@@ -776,7 +710,7 @@ export async function generateTextWithMeta(
           model: resolvedModel,
           isDebug,
           fn: async () => {
-            await waitForLlmRequestSlot("gemini");
+            await waitForLlmRequestSlot();
             return gemini.models.generateContent({
               model: resolvedModel,
               contents,
@@ -807,22 +741,12 @@ export async function generateTextWithMeta(
           break;
         }
 
-        totalToolCalls += functionCalls.length;
-        if (isDebug && hasGeminiFunctionTools) {
-          console.warn("[llmRouter] gemini-tool-calls", {
-            iteration: attempt + 1,
-            toolCallsThisIteration: functionCalls.length,
-            totalToolCalls,
-            toolNames: functionCalls
-              .map((part: any) => part.functionCall?.name)
-              .filter(Boolean),
-          });
-        }
-        if (totalToolCalls > maxToolCalls) {
+        const nextTotalToolCalls = totalToolCalls + functionCalls.length;
+        if (nextTotalToolCalls > maxToolCalls) {
           if (isDebug && hasGeminiFunctionTools) {
             console.warn("[llmRouter] gemini-tool-call-limit-hit", {
               iteration: attempt + 1,
-              totalToolCalls,
+              totalToolCalls: nextTotalToolCalls,
               maxToolCalls,
             });
           }
@@ -837,6 +761,18 @@ export async function generateTextWithMeta(
             isDebug,
           });
           break;
+        }
+
+        totalToolCalls = nextTotalToolCalls;
+        if (isDebug && hasGeminiFunctionTools) {
+          console.warn("[llmRouter] gemini-tool-calls", {
+            iteration: attempt + 1,
+            toolCallsThisIteration: functionCalls.length,
+            totalToolCalls,
+            toolNames: functionCalls
+              .map((part: any) => part.functionCall?.name)
+              .filter(Boolean),
+          });
         }
 
         const toolResponses = [];

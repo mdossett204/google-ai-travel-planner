@@ -17,7 +17,7 @@ import {
 } from "../utils/tripContext.js";
 import {
   handleApiError,
-  monthLabels,
+  formatTimeOfYear,
   sanitizePromptInput,
   sendJson,
   type ApiRequest,
@@ -47,12 +47,10 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     const preferredLocation = formatPreferredLocation(
       data.preferredLocation || {},
     );
-    const timeOfYear =
-      data.timeOfYear?.length > 0
-        ? data.timeOfYear
-            .map((month: string) => monthLabels[month] || month)
-            .join(", ")
-        : "Not specified. Recommend the best realistic time to visit.";
+    const timeOfYear = formatTimeOfYear(
+      data.timeOfYear,
+      "Not specified. Recommend the best realistic time to visit.",
+    );
 
     const durationValue = data.durationValue;
     const locationRules = [
@@ -181,10 +179,13 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
     let parsed = null;
     for (let attempt = 0; attempt < 2; attempt++) {
+      const systemInstruction =
+        attempt === 0
+          ? "You are an elite travel concierge. At this stage, your job is to recommend destination concepts, not verified bookings. Use general destination knowledge and avoid web search in this stage. Do not include hotels, restaurants, exact addresses, opening hours, or official websites. Food preferences should usually be treated as a downstream itinerary constraint unless food is a primary travel goal. Provide factual, realistic recommendations grounded in the user's budget and travel goals."
+          : "You are an elite travel concierge. Return ONLY a valid JSON array with exactly 3 recommendation objects matching the requested schema. Do not include any explanation, markdown, or text outside the JSON array.";
       const text = await generateText({
         prompt,
-        systemInstruction:
-          "You are an elite travel concierge. At this stage, your job is to recommend destination concepts, not verified bookings. Use general destination knowledge and avoid web search in this stage. Do not include hotels, restaurants, exact addresses, opening hours, or official websites. Food preferences should usually be treated as a downstream itinerary constraint unless food is a primary travel goal. Provide factual, realistic recommendations grounded in the user's budget and travel goals.",
+        systemInstruction,
         useSearchTool: false,
       });
 

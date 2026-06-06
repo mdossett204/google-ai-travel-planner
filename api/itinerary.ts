@@ -18,10 +18,11 @@ import { formatLodgingPreferences } from "../utils/lodgingPreferences.js";
 import {
   formatPreferredLocation,
   formatTravelerType,
+  getOnLocationDays,
 } from "../utils/tripContext.js";
 import {
   handleApiError,
-  monthLabels,
+  formatTimeOfYear,
   sanitizePromptInput,
   sendJson,
   type ApiRequest,
@@ -146,12 +147,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     const preferredLocation = formatPreferredLocation(
       data?.preferredLocation || {},
     );
-    const timeOfYear =
-      data?.timeOfYear?.length > 0
-        ? data.timeOfYear
-            .map((month: string) => monthLabels[month] || month)
-            .join(", ")
-        : "Not specified";
+    const timeOfYear = formatTimeOfYear(data?.timeOfYear);
 
     const durationValue = data.durationValue;
     const durationDays =
@@ -170,7 +166,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       .filter(Boolean)
       .join(" ");
 
-    const onLocationDays = Math.max(durationDays - 2, 0);
+    const onLocationDays = getOnLocationDays(durationDays);
     const tripStructureNote =
       durationDays >= 2
         ? `Trip structure: Day 1 is primarily travel/arrival, Day ${durationDays} is primarily departure travel. Plan on-location activities mainly for Days 2 through ${Math.max(

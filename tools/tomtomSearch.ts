@@ -153,7 +153,7 @@ function normalizeSearchResult(rawResult: unknown): TomTomSearchResult {
 function normalizeForMatch(s: string): string {
   return s
     .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, "")
     .trim();
@@ -236,7 +236,7 @@ export async function executeSearchPlace(
   const result = results[0] || null;
   const isMatch = isTomTomResultMatch({ placeName, locationHint, result });
 
-  if (process.env.DEBUG_LLM_ROUTER === "true") {
+  if (isDebugEnabled()) {
     console.warn(`[${debugLabel}] search_place-result`, {
       query,
       isMatch,
