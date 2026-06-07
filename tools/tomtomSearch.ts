@@ -40,6 +40,7 @@ const TOMTOM_CACHE_TTL_MS = 5 * 60 * 1000;
 const TOMTOM_REDIS_CACHE_TTL_SEC = 30 * 24 * 60 * 60; // 30 days
 
 let lastTomTomRequestAt = 0;
+// Serverless note: This queue limits concurrency per function instance, not globally across all instances.
 let tomTomQueue: Promise<void> = Promise.resolve();
 
 const tomTomCache = new Map<
@@ -79,7 +80,6 @@ export function assertTomTomApiKeyConfigured() {
 function isDebugEnabled() {
   return process.env.DEBUG_LLM_ROUTER === "true";
 }
-
 
 function buildCacheKey({
   query,
@@ -362,9 +362,8 @@ export async function searchTomTom({
 
     const details = await response.text().catch(() => "");
     if (response.status !== 429 || attempt === TOMTOM_MAX_RETRIES - 1) {
-      throw new Error(
-        `TomTom search failed with ${response.status}${details ? `: ${details}` : ""}`,
-      );
+      console.error(`[tomtomSearch] API Error ${response.status}:`, details);
+      throw new Error(`TomTom search failed with status ${response.status}`);
     }
 
     const delayMs = TOMTOM_RETRY_BASE_DELAY_MS * 2 ** attempt;

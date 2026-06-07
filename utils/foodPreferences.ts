@@ -19,7 +19,9 @@ export function formatFoodPreferences(input: FoodPreferencesInput): string {
   const cuisineInterests = formatList(input?.cuisineInterests);
   const diningStyle = formatList(input?.diningStyle);
   const foodPlaceTypes = formatList(input?.foodPlaceTypes);
-  const foodPriority = sanitizePromptInput(input?.foodPriority || "Nice to Have");
+  const foodPriority = sanitizePromptInput(
+    input?.foodPriority || "Not specified",
+  );
 
   return [
     `- Food Stops: ${foodPlaceTypes}`,

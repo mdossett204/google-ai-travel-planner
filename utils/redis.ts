@@ -34,8 +34,7 @@ type MemoryEntry = {
 
 const redisUrl = process.env.REDIS_URL?.trim();
 const isLocalDevelopment = process.env.NODE_ENV !== "production";
-const hasPlaceholderRedisUrl =
-  !redisUrl || /^YOUR_[A-Z0-9_]+$/i.test(redisUrl);
+const hasPlaceholderRedisUrl = !redisUrl || /^YOUR_[A-Z0-9_]+$/i.test(redisUrl);
 const memoryStore = new Map<string, MemoryEntry>();
 let hasLoggedLocalFallback = false;
 
@@ -60,7 +59,6 @@ function logLocalFallback(reason: string) {
     `[redis] ${reason} Falling back to in-memory storage for local development.`,
   );
 }
-
 
 const localRedisClient: RedisClientLike = {
   async get(key) {

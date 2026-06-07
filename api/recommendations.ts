@@ -134,12 +134,12 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     You MUST return valid JSON only. Do not include markdown, commentary, or code fences.
     Return a JSON array of exactly 3 objects.
     Each object must have exactly these keys:
-    - "id": unique lowercase kebab-case identifier based on destination and trip style
-    - "title": destination plus a concise trip style title
-    - "description": 2-4 sentences explaining why this trip is a strong match
-    - "highlights": array of 3-4 specific highlights, neighborhoods, or activities
-    - "estimatedCost": numerical USD range such as "$1,800 - $2,400"
-    - "bestTimeToGo": recommended months or season, grounded in the user's timing if possible
+    - "id": unique lowercase kebab-case identifier based on destination and trip style (must be under 100 characters)
+    - "title": destination plus a concise trip style title (must be under 100 characters)
+    - "description": 2-4 sentences explaining why this trip is a strong match (must be under 1000 characters)
+    - "highlights": array of 3-4 specific highlights, neighborhoods, or activities (each under 100 characters)
+    - "estimatedCost": numerical USD range such as "$1,800 - $2,400" (must be under 100 characters)
+    - "bestTimeToGo": recommended months or season, grounded in the user's timing if possible (must be under 100 characters)
 
     JSON OUTPUT EXAMPLE
     [

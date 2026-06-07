@@ -133,9 +133,9 @@ export default function Recommendations({
                     Highlights
                   </h4>
                   <ul className="space-y-2">
-                    {rec.highlights.map((highlight, idx) => (
+                    {rec.highlights.map((highlight) => (
                       <li
-                        key={idx}
+                        key={highlight}
                         className="flex items-start gap-2 text-sm text-slate-700"
                       >
                         <CheckCircle2

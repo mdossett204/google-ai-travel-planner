@@ -24,7 +24,10 @@ export const monthLabels: Record<string, string> = {
   Dec: "December (winter)",
 };
 
-export function formatTimeOfYear(months: string[], fallback = "Not specified"): string {
+export function formatTimeOfYear(
+  months: string[],
+  fallback = "Not specified",
+): string {
   return months?.length > 0
     ? months.map((month) => monthLabels[month] || month).join(", ")
     : fallback;
@@ -56,8 +59,6 @@ export function sendJson(res: ApiResponse, status: number, data: unknown) {
 }
 
 export function handleApiError(res: ApiResponse, err: unknown) {
-  console.error(err);
-
   const errorRecord = err as Record<string, unknown>;
   const name = err instanceof Error ? err.name : errorRecord?.name;
   const message = err instanceof Error ? err.message : errorRecord?.message;
@@ -89,5 +90,6 @@ export function handleApiError(res: ApiResponse, err: unknown) {
     });
   }
 
+  console.error("Unhandled API error:", err);
   return sendJson(res, 500, { error: "Server error" });
 }

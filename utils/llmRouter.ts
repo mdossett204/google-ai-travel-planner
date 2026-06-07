@@ -41,7 +41,6 @@ interface GeminiFunctionCall {
   args?: Record<string, unknown>;
 }
 
-
 async function waitForLlmRequestSlot() {
   const success = await runFixedWindowRateLimit(
     GLOBAL_LLM_RATE_LIMIT_KEY,
@@ -56,13 +55,14 @@ async function waitForLlmRequestSlot() {
 }
 
 function isRateLimitError(err: unknown) {
-  const e = err as Record<string, any>;
+  const e = err as Record<string, unknown>;
+  const eError = e?.error as Record<string, unknown> | undefined;
   return (
     e?.status === 429 ||
     e?.statusCode === 429 ||
     e?.code === 429 ||
-    e?.error?.code === 429 ||
-    e?.error?.status === "RESOURCE_EXHAUSTED" ||
+    eError?.code === 429 ||
+    eError?.status === "RESOURCE_EXHAUSTED" ||
     e?.status === "RESOURCE_EXHAUSTED"
   );
 }
@@ -151,11 +151,11 @@ export function assertProviderApiKeysConfigured(providers: LlmProvider[]) {
 
 function normalizeText(input: unknown): string {
   if (typeof input === "string") return input.trim();
-  const safeInput = input as Record<string, any>;
+  const safeInput = input as Record<string, unknown>;
   const blocks = Array.isArray(safeInput?.content) ? safeInput.content : [];
   const text = blocks
-    .filter((b: Record<string, any>) => b?.type === "text")
-    .map((b: Record<string, any>) => b?.text || "")
+    .filter((b: Record<string, unknown>) => b?.type === "text")
+    .map((b: Record<string, unknown>) => (b?.text as string) || "")
     .join("\n")
     .trim();
   return text;
@@ -168,7 +168,10 @@ function getToolLimitFallbackPrompt(provider: string, maxToolCalls: number) {
   return `Tool use has reached the limit (${maxToolCalls}) for ${provider}. ${TOOL_LIMIT_FALLBACK_PROMPT}`;
 }
 
-function buildFallbackContent(providerLabel?: string, maxToolCalls?: number): string {
+function buildFallbackContent(
+  providerLabel?: string,
+  maxToolCalls?: number,
+): string {
   return providerLabel != null && maxToolCalls != null
     ? getToolLimitFallbackPrompt(providerLabel, maxToolCalls)
     : TOOL_LIMIT_FALLBACK_PROMPT;
@@ -269,7 +272,11 @@ async function finalizeAnthropicWithoutTools({
     isDebug,
     fn: async () => {
       await waitForLlmRequestSlot();
-      return anthropic.messages.create({ model, max_tokens: ANTHROPIC_MAX_TOKENS, messages: finalMessages });
+      return anthropic.messages.create({
+        model,
+        max_tokens: ANTHROPIC_MAX_TOKENS,
+        messages: finalMessages,
+      });
     },
   });
   return normalizeText(msg);
@@ -302,7 +309,11 @@ async function finalizeGeminiWithoutTools({
     isDebug,
     fn: async () => {
       await waitForLlmRequestSlot();
-      return gemini.models.generateContent({ model, contents: finalContents, config: { systemInstruction } });
+      return gemini.models.generateContent({
+        model,
+        contents: finalContents,
+        config: { systemInstruction },
+      });
     },
   });
   return normalizeText(response.text || "");

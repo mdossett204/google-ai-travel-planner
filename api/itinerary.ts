@@ -167,13 +167,18 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       .join(" ");
 
     const onLocationDays = getOnLocationDays(durationDays);
-    const tripStructureNote =
-      durationDays >= 2
-        ? `Trip structure: Day 1 is primarily travel/arrival, Day ${durationDays} is primarily departure travel. Plan on-location activities mainly for Days 2 through ${Math.max(
-            durationDays - 1,
-            2,
-          )} (=${onLocationDays} full activity days).`
-        : "Trip structure: Same-day trip (travel + activities in one day). Keep it very light and realistic.";
+
+    let tripStructureNote = "";
+    if (durationDays === 1) {
+      tripStructureNote =
+        "Trip structure: Same-day trip (travel + activities in one day). Keep it very light and realistic.";
+    } else if (durationDays === 2) {
+      tripStructureNote = `Trip structure: Day 1 is primarily travel/arrival, Day 2 is primarily departure travel. Keep plans light and close to the base. (Pace for ~${onLocationDays} full day of activities total).`;
+    } else if (durationDays === 3) {
+      tripStructureNote = `Trip structure: Day 1 is travel/arrival, Day 3 is departure. Day 2 is the main full day. (Pace for ~${onLocationDays} full days' worth of activities spread across the trip).`;
+    } else {
+      tripStructureNote = `Trip structure: Day 1 is primarily travel/arrival, Day ${durationDays} is primarily departure travel. Plan main on-location activities for Days 2 through ${durationDays - 1}. (Pace for ~${onLocationDays} full days' worth of activities spread across the trip).`;
+    }
 
     const draftTaskLines = [
       "Create one combined trip-planning draft that includes:",
