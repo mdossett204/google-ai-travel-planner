@@ -73,29 +73,35 @@ async function getApiErrorMessage(
   return fallbackMessage;
 }
 
-export async function getRecommendations(
-  data: TravelFormData,
+async function fetchApi<T>(
+  endpoint: string,
+  body: unknown,
   signal?: AbortSignal,
-): Promise<Recommendation[]> {
-  // Previous client-side Gemini call is intentionally removed for security.
-  // Keeping this comment to preserve the original flow as reference:
-  // - It used GoogleGenAI directly in the browser.
-  // - It parsed JSON from the model response.
-  // We now call the serverless API instead.
-  const res = await fetch("/api/recommendations", {
+): Promise<T> {
+  const res = await fetch(endpoint, {
     method: "POST",
     headers: API_HEADERS,
-    body: JSON.stringify(data),
+    body: JSON.stringify(body),
     signal,
   });
 
   if (!res.ok) {
     throw new Error(
-      await getApiErrorMessage(res, "Failed to fetch recommendations."),
+      await getApiErrorMessage(res, `Failed to fetch from ${endpoint}.`),
     );
   }
+  return res.json() as Promise<T>;
+}
 
-  const payload = await res.json();
+export async function getRecommendations(
+  data: TravelFormData,
+  signal?: AbortSignal,
+): Promise<Recommendation[]> {
+  const payload = await fetchApi<unknown[]>(
+    "/api/recommendations",
+    data,
+    signal,
+  );
   if (!Array.isArray(payload)) {
     throw new Error(
       "Invalid response format: expected an array of recommendations.",
@@ -130,20 +136,11 @@ export async function getItinerary(
   recommendation: Recommendation,
   signal?: AbortSignal,
 ): Promise<string> {
-  const res = await fetch("/api/itinerary", {
-    method: "POST",
-    headers: API_HEADERS,
-    body: JSON.stringify({ data, recommendation }),
+  const payload = await fetchApi<Record<string, unknown>>(
+    "/api/itinerary",
+    { data, recommendation },
     signal,
-  });
-
-  if (!res.ok) {
-    throw new Error(
-      await getApiErrorMessage(res, "Failed to fetch itinerary."),
-    );
-  }
-
-  const payload = await res.json();
+  );
   if (
     !payload ||
     typeof payload !== "object" ||

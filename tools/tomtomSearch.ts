@@ -313,22 +313,24 @@ export async function searchTomTom({
     console.warn("[tomtomSearch] redis-cache-read-error", err);
   }
 
-  const params = new URLSearchParams({
-    key: assertTomTomApiKeyConfigured(),
+  const apiKey = assertTomTomApiKeyConfigured();
+  const safeParams = new URLSearchParams({
     limit: String(limit),
   });
 
   if (typeof latitude === "number" && typeof longitude === "number") {
-    params.set("lat", String(latitude));
-    params.set("lon", String(longitude));
+    safeParams.set("lat", String(latitude));
+    safeParams.set("lon", String(longitude));
   }
 
   const encodedQuery = encodeURIComponent(trimmedQuery);
-  const url = `https://api.tomtom.com/search/2/poiSearch/${encodedQuery}.json?${params.toString()}`;
+  const safeUrl = `https://api.tomtom.com/search/2/poiSearch/${encodedQuery}.json?${safeParams.toString()}`;
+  const fetchUrl = `${safeUrl}&key=${apiKey}`;
 
   if (isDebugEnabled()) {
     console.warn("[tomtomSearch] request", {
       query: trimmedQuery,
+      url: safeUrl,
     });
   }
   let results: TomTomSearchResult[] = [];
@@ -336,15 +338,36 @@ export async function searchTomTom({
   for (let attempt = 0; attempt < TOMTOM_MAX_RETRIES; attempt += 1) {
     await waitForTomTomSlot();
 
-    const response = await fetch(url, {
-      method: "GET",
-      headers: { Accept: "application/json" },
-    });
+    let response: Response;
+    try {
+      response = await fetch(fetchUrl, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+      });
+    } catch (networkError) {
+      const errorMessage =
+        networkError instanceof Error
+          ? networkError.message
+          : String(networkError);
+      const safeMessage = errorMessage.split(apiKey).join("***REDACTED***");
+
+      console.error(
+        "[tomtomSearch] network error:",
+        safeMessage,
+        "for URL:",
+        safeUrl,
+      );
+
+      // Catch low-level crashes to prevent the raw URL and API key from leaking into stack traces
+      throw new Error(
+        "A network error occurred while connecting to the TomTom API.",
+      );
+    }
 
     if (response.ok) {
       const payload = (await response.json()) as TomTomSearchResponse;
       const rawResults = Array.isArray(payload.results) ? payload.results : [];
-      results = rawResults.map(normalizeSearchResult);
+      results = rawResults.map((r) => normalizeSearchResult(r));
 
       evictLeastRecentlyUsed();
       tomTomCache.set(cacheKey, {
@@ -361,7 +384,10 @@ export async function searchTomTom({
     }
 
     const details = await response.text().catch(() => "");
-    if (response.status !== 429 || attempt === TOMTOM_MAX_RETRIES - 1) {
+    const isRetryable =
+      response.status === 429 ||
+      (response.status >= 500 && response.status <= 504);
+    if (!isRetryable || attempt === TOMTOM_MAX_RETRIES - 1) {
       console.error(`[tomtomSearch] API Error ${response.status}:`, details);
       throw new Error(`TomTom search failed with status ${response.status}`);
     }

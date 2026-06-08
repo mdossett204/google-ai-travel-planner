@@ -78,6 +78,29 @@ function AppContent() {
     return () => abortControllerRef.current?.abort();
   }, []);
 
+  const executeWithLoading = async (
+    action: (signal: AbortSignal) => Promise<void>,
+    fallbackError: string,
+  ) => {
+    abortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
+    setIsLoading(true);
+    setError(null);
+    try {
+      await action(abortController.signal);
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === "AbortError") return;
+      console.error(err);
+      setError(getErrorMessage(err, fallbackError));
+    } finally {
+      if (abortControllerRef.current === abortController) {
+        setIsLoading(false);
+      }
+    }
+  };
+
   const handleFormSubmit = async (data: TravelFormData) => {
     // Cache check: If form data hasn't changed, just show the existing recommendations
     if (
@@ -89,14 +112,8 @@ function AppContent() {
       return;
     }
 
-    abortControllerRef.current?.abort();
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
-
-    setIsLoading(true);
-    setError(null);
-    try {
-      const recs = await getRecommendations(data, abortController.signal);
+    await executeWithLoading(async (signal) => {
+      const recs = await getRecommendations(data, signal);
       if (recs && recs.length > 0) {
         setFormData(data);
         setRecommendations(recs);
@@ -105,22 +122,7 @@ function AppContent() {
       } else {
         setError("Couldn't generate recommendations. Please try again.");
       }
-    } catch (err: unknown) {
-      if (err instanceof Error && err.name === "AbortError") {
-        return; // Intentional abort, do nothing
-      }
-      console.error(err);
-      setError(
-        getErrorMessage(
-          err,
-          "An error occurred while fetching recommendations.",
-        ),
-      );
-    } finally {
-      if (abortControllerRef.current === abortController) {
-        setIsLoading(false);
-      }
-    }
+    }, "An error occurred while fetching recommendations.");
   };
 
   const handleRecommendationSelect = async (rec: Recommendation) => {
@@ -134,14 +136,8 @@ function AppContent() {
       return;
     }
 
-    abortControllerRef.current?.abort();
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
-
-    setIsLoading(true);
-    setError(null);
-    try {
-      const plan = await getItinerary(formData, rec, abortController.signal);
+    await executeWithLoading(async (signal) => {
+      const plan = await getItinerary(formData, rec, signal);
       if (plan) {
         setSelectedRecommendation(rec);
         setItinerary(plan);
@@ -150,19 +146,7 @@ function AppContent() {
       } else {
         setError("Couldn't generate the itinerary. Please try again.");
       }
-    } catch (err: unknown) {
-      if (err instanceof Error && err.name === "AbortError") {
-        return; // Intentional abort, do nothing
-      }
-      console.error(err);
-      setError(
-        getErrorMessage(err, "An error occurred while fetching the itinerary."),
-      );
-    } finally {
-      if (abortControllerRef.current === abortController) {
-        setIsLoading(false);
-      }
-    }
+    }, "An error occurred while fetching the itinerary.");
   };
 
   const handleBackToForm = () => {

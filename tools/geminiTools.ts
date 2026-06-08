@@ -1,4 +1,4 @@
-import { executeSearchPlace } from "./tomtomSearch.js";
+import { SEARCH_PLACE_TOOL, executeProviderTool } from "./toolDefinitions.js";
 
 export interface GeminiToolDefinition {
   functionDeclarations: Array<{
@@ -16,29 +16,7 @@ export interface GeminiToolExecutionContext {
 export function getGeminiVerificationTools(): GeminiToolDefinition[] {
   return [
     {
-      functionDeclarations: [
-        {
-          name: "search_place",
-          description:
-            "Verify a hotel, restaurant, attraction, or business by searching for its official place details. Use this before including a place in the final answer.",
-          parameters: {
-            type: "OBJECT",
-            properties: {
-              name: {
-                type: "STRING",
-                description:
-                  "The exact or best-known name of the place to verify.",
-              },
-              locationHint: {
-                type: "STRING",
-                description:
-                  "Optional city, region, or destination hint to narrow the search.",
-              },
-            },
-            required: ["name"],
-          },
-        },
-      ],
+      functionDeclarations: [SEARCH_PLACE_TOOL],
     },
   ];
 }
@@ -47,12 +25,5 @@ export async function executeGeminiTool({
   name,
   args,
 }: GeminiToolExecutionContext): Promise<Record<string, unknown>> {
-  if (name === "search_place") {
-    return executeSearchPlace(args, "geminiTools");
-  }
-
-  return {
-    ok: false,
-    error: `Unknown tool: ${name}`,
-  };
+  return executeProviderTool(name, args, "geminiTools");
 }

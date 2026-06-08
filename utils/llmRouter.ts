@@ -54,17 +54,18 @@ async function waitForLlmRequestSlot() {
   }
 }
 
-function isRateLimitError(err: unknown) {
+function isRetryableApiError(err: unknown) {
   const e = err as Record<string, unknown>;
   const eError = e?.error as Record<string, unknown> | undefined;
-  return (
-    e?.status === 429 ||
-    e?.statusCode === 429 ||
-    e?.code === 429 ||
-    eError?.code === 429 ||
-    eError?.status === "RESOURCE_EXHAUSTED" ||
-    e?.status === "RESOURCE_EXHAUSTED"
-  );
+  const status =
+    e?.status ?? e?.statusCode ?? e?.code ?? eError?.code ?? eError?.status;
+
+  if (status === 429 || status === "RESOURCE_EXHAUSTED") return true;
+
+  const numStatus = Number(status);
+  if (numStatus >= 500 && numStatus <= 504) return true;
+
+  return false;
 }
 
 async function withLlmRetry<T>({
@@ -78,12 +79,12 @@ async function withLlmRetry<T>({
   model: string;
   isDebug: boolean;
 }): Promise<T> {
-  for (let attempt = 0; attempt < LLM_MAX_RETRIES; attempt += 1) {
+  let attempt = 0;
+  while (true) {
     try {
       return await fn();
     } catch (err: unknown) {
-      const isLastAttempt = attempt === LLM_MAX_RETRIES - 1;
-      if (!isRateLimitError(err) || isLastAttempt) {
+      if (!isRetryableApiError(err) || attempt >= LLM_MAX_RETRIES - 1) {
         throw err;
       }
 
@@ -98,10 +99,9 @@ async function withLlmRetry<T>({
       }
 
       await sleep(delayMs);
+      attempt += 1;
     }
   }
-
-  throw new Error("LLM retry failed unexpectedly.");
 }
 
 export function getProvider(input?: string): LlmProvider {
@@ -151,8 +151,9 @@ export function assertProviderApiKeysConfigured(providers: LlmProvider[]) {
 
 function normalizeText(input: unknown): string {
   if (typeof input === "string") return input.trim();
+  if (typeof input !== "object" || input === null) return "";
   const safeInput = input as Record<string, unknown>;
-  const blocks = Array.isArray(safeInput?.content) ? safeInput.content : [];
+  const blocks = Array.isArray(safeInput.content) ? safeInput.content : [];
   const text = blocks
     .filter((b: Record<string, unknown>) => b?.type === "text")
     .map((b: Record<string, unknown>) => (b?.text as string) || "")
@@ -177,146 +178,53 @@ function buildFallbackContent(
     : TOOL_LIMIT_FALLBACK_PROMPT;
 }
 
-function appendFallbackToMessages(messages: any[], content: string): any[] {
-  const finalMessages = [...messages];
-  const last = finalMessages[finalMessages.length - 1];
+function appendFallbackToHistory(
+  history: any[],
+  content: string,
+  format: "messages" | "contents",
+): any[] {
+  const finalHistory = [...history];
+  const last = finalHistory[finalHistory.length - 1];
+
   if (last && last.role === "user") {
-    const newContent = Array.isArray(last.content)
-      ? [...last.content, { type: "text", text: content }]
-      : `${last.content}\n\n${content}`;
-    finalMessages[finalMessages.length - 1] = { ...last, content: newContent };
+    if (format === "contents") {
+      finalHistory[finalHistory.length - 1] = {
+        ...last,
+        parts: [...(last.parts || []), { text: content }],
+      };
+    } else {
+      const newContent = Array.isArray(last.content)
+        ? [...last.content, { type: "text", text: content }]
+        : `${last.content}\n\n${content}`;
+      finalHistory[finalHistory.length - 1] = { ...last, content: newContent };
+    }
   } else {
-    finalMessages.push({ role: "user", content });
+    finalHistory.push(
+      format === "contents"
+        ? { role: "user", parts: [{ text: content }] }
+        : { role: "user", content },
+    );
   }
-  return finalMessages;
+  return finalHistory;
 }
 
-function appendFallbackToContents(contents: any[], content: string): any[] {
-  const finalContents = [...contents];
-  const last = finalContents[finalContents.length - 1];
-  if (last && last.role === "user") {
-    finalContents[finalContents.length - 1] = {
-      ...last,
-      parts: [...(last.parts || []), { text: content }],
-    };
-  } else {
-    finalContents.push({ role: "user", parts: [{ text: content }] });
-  }
-  return finalContents;
-}
-
-async function finalizeOpenAIWithoutTools({
-  openai,
-  model,
-  messages,
-  providerLabel,
-  maxToolCalls,
-  isDebug,
-}: {
-  openai: OpenAI;
-  model: string;
-  messages: OpenAI.Chat.ChatCompletionMessageParam[];
-  providerLabel?: string;
-  maxToolCalls?: number;
-  isDebug: boolean;
-}) {
-  const finalMessages = appendFallbackToMessages(
-    messages,
-    buildFallbackContent(providerLabel, maxToolCalls),
-  );
+async function executeFinalFallbackCall(
+  provider: string,
+  model: string,
+  isDebug: boolean,
+  apiCall: () => Promise<any>,
+  extractResult: (response: any) => unknown,
+): Promise<string> {
   const response = await withLlmRetry({
-    provider: "openai",
+    provider,
     model,
     isDebug,
     fn: async () => {
       await waitForLlmRequestSlot();
-      return openai.chat.completions.create({ model, messages: finalMessages });
+      return apiCall();
     },
   });
-  return normalizeText(response.choices[0]?.message?.content || "");
-}
-
-async function finalizeAnthropicWithoutTools({
-  anthropic,
-  model,
-  messages,
-  providerLabel,
-  maxToolCalls,
-  reason,
-  isDebug,
-}: {
-  anthropic: Anthropic;
-  model: string;
-  messages: Anthropic.MessageParam[];
-  providerLabel?: string;
-  maxToolCalls?: number;
-  reason?: "tool-limit-hit" | "iteration-limit-hit" | "loop-finalize";
-  isDebug: boolean;
-}) {
-  if (isDebug) {
-    console.warn("[llmRouter] anthropic-finalize-without-tools", {
-      model,
-      providerLabel: providerLabel || "anthropic",
-      maxToolCalls: maxToolCalls ?? null,
-      messageCount: messages.length,
-      reason: reason || "loop-finalize",
-    });
-  }
-  const finalMessages = appendFallbackToMessages(
-    messages,
-    buildFallbackContent(providerLabel, maxToolCalls),
-  );
-  const msg = await withLlmRetry({
-    provider: "anthropic",
-    model,
-    isDebug,
-    fn: async () => {
-      await waitForLlmRequestSlot();
-      return anthropic.messages.create({
-        model,
-        max_tokens: ANTHROPIC_MAX_TOKENS,
-        messages: finalMessages,
-      });
-    },
-  });
-  return normalizeText(msg);
-}
-
-async function finalizeGeminiWithoutTools({
-  gemini,
-  model,
-  contents,
-  systemInstruction,
-  providerLabel,
-  maxToolCalls,
-  isDebug,
-}: {
-  gemini: GoogleGenAI;
-  model: string;
-  contents: any[];
-  systemInstruction?: string;
-  providerLabel?: string;
-  maxToolCalls?: number;
-  isDebug: boolean;
-}) {
-  const finalContents = appendFallbackToContents(
-    contents,
-    buildFallbackContent(providerLabel, maxToolCalls),
-  );
-  const response = await withLlmRetry({
-    provider: "gemini",
-    model,
-    isDebug,
-    fn: async () => {
-      await waitForLlmRequestSlot();
-      return gemini.models.generateContent({
-        model,
-        contents: finalContents,
-        config: { systemInstruction },
-      });
-    },
-  });
-  return normalizeText(response.text || "");
+  return normalizeText(extractResult(response));
 }
 
 export interface GenerateTextResult {
@@ -373,7 +281,7 @@ export async function generateTextWithMeta(
   opts: GenerateTextOptions,
 ): Promise<GenerateTextResult> {
   const startedAt = Date.now();
-  const provider = getProvider(opts.provider) || "gemini";
+  const provider = getProvider(opts.provider);
   assertProviderApiKeyConfigured(provider);
   const model = opts.model?.trim() || "";
   const isDebug = process.env.DEBUG_LLM_ROUTER === "true";
@@ -476,14 +384,22 @@ export async function generateTextWithMeta(
             });
           }
           usedFallback = true;
-          text = await finalizeOpenAIWithoutTools({
-            openai,
-            model: resolvedModel,
+          const finalMessages = appendFallbackToHistory(
             messages,
-            providerLabel: "OpenAI",
-            maxToolCalls,
+            buildFallbackContent("OpenAI", maxToolCalls),
+            "messages",
+          );
+          text = await executeFinalFallbackCall(
+            provider,
+            resolvedModel,
             isDebug,
-          });
+            () =>
+              openai.chat.completions.create({
+                model: resolvedModel,
+                messages: finalMessages,
+              }),
+            (res) => res.choices[0]?.message?.content || "",
+          );
           break;
         }
 
@@ -500,10 +416,22 @@ export async function generateTextWithMeta(
             parsedArgs = {};
           }
 
-          const result = await executeOpenAITool({
-            name: toolCall.function.name,
-            args: parsedArgs,
-          });
+          let result: Record<string, unknown>;
+          try {
+            result = await executeOpenAITool({
+              name: toolCall.function.name,
+              args: parsedArgs,
+            });
+          } catch (toolErr) {
+            console.error(
+              `[llmRouter] openai-tool-error for ${toolCall.function.name}:`,
+              toolErr,
+            );
+            result = {
+              ok: false,
+              error: "Tool execution failed due to an internal error.",
+            };
+          }
 
           if (isDebug) {
             console.warn("[llmRouter] openai-tool-response", {
@@ -523,12 +451,22 @@ export async function generateTextWithMeta(
 
       if (!text) {
         usedFallback = true;
-        text = await finalizeOpenAIWithoutTools({
-          openai,
-          model: resolvedModel,
+        const finalMessages = appendFallbackToHistory(
           messages,
+          buildFallbackContent(),
+          "messages",
+        );
+        text = await executeFinalFallbackCall(
+          provider,
+          resolvedModel,
           isDebug,
-        });
+          () =>
+            openai.chat.completions.create({
+              model: resolvedModel,
+              messages: finalMessages,
+            }),
+          (res) => res.choices[0]?.message?.content || "",
+        );
       }
     }
   } else if (provider === "anthropic") {
@@ -604,15 +542,24 @@ export async function generateTextWithMeta(
             });
           }
           usedFallback = true;
-          text = await finalizeAnthropicWithoutTools({
-            anthropic,
-            model: resolvedModel,
+          const finalMessages = appendFallbackToHistory(
             messages,
-            providerLabel: "Anthropic",
-            maxToolCalls,
-            reason: "tool-limit-hit",
+            buildFallbackContent("Anthropic", maxToolCalls),
+            "messages",
+          );
+          text = await executeFinalFallbackCall(
+            provider,
+            resolvedModel,
             isDebug,
-          });
+            () =>
+              anthropic.messages.create({
+                model: resolvedModel,
+                max_tokens: ANTHROPIC_MAX_TOKENS,
+                system: opts.systemInstruction,
+                messages: finalMessages,
+              }),
+            (res) => res,
+          );
           break;
         }
 
@@ -633,10 +580,22 @@ export async function generateTextWithMeta(
               ? (toolUse.input as Record<string, unknown>)
               : {};
 
-          const result = await executeAnthropicTool({
-            name: toolUse.name,
-            args: toolArgs,
-          });
+          let result: Record<string, unknown>;
+          try {
+            result = await executeAnthropicTool({
+              name: toolUse.name,
+              args: toolArgs,
+            });
+          } catch (toolErr) {
+            console.error(
+              `[llmRouter] anthropic-tool-error for ${toolUse.name}:`,
+              toolErr,
+            );
+            result = {
+              ok: false,
+              error: "Tool execution failed due to an internal error.",
+            };
+          }
 
           if (isDebug) {
             console.warn("[llmRouter] anthropic-tool-response", {
@@ -668,13 +627,24 @@ export async function generateTextWithMeta(
 
       if (!text) {
         usedFallback = true;
-        text = await finalizeAnthropicWithoutTools({
-          anthropic,
-          model: resolvedModel,
+        const finalMessages = appendFallbackToHistory(
           messages,
-          reason: totalToolCalls > 0 ? "iteration-limit-hit" : "loop-finalize",
+          buildFallbackContent(),
+          "messages",
+        );
+        text = await executeFinalFallbackCall(
+          provider,
+          resolvedModel,
           isDebug,
-        });
+          () =>
+            anthropic.messages.create({
+              model: resolvedModel,
+              max_tokens: ANTHROPIC_MAX_TOKENS,
+              system: opts.systemInstruction,
+              messages: finalMessages,
+            }),
+          (res) => res,
+        );
       }
     }
   } else {
@@ -762,15 +732,23 @@ export async function generateTextWithMeta(
             });
           }
           usedFallback = true;
-          text = await finalizeGeminiWithoutTools({
-            gemini,
-            model: resolvedModel,
+          const finalContents = appendFallbackToHistory(
             contents,
-            systemInstruction: opts.systemInstruction,
-            providerLabel: "Gemini",
-            maxToolCalls,
+            buildFallbackContent("Gemini", maxToolCalls),
+            "contents",
+          );
+          text = await executeFinalFallbackCall(
+            provider,
+            resolvedModel,
             isDebug,
-          });
+            () =>
+              gemini.models.generateContent({
+                model: resolvedModel,
+                contents: finalContents,
+                config: { systemInstruction: opts.systemInstruction },
+              }),
+            (res) => res.text || "",
+          );
           break;
         }
 
@@ -795,10 +773,22 @@ export async function generateTextWithMeta(
             continue;
           }
 
-          const result = await executeGeminiTool({
-            name: functionCall.name,
-            args: functionCall.args || {},
-          });
+          let result: Record<string, unknown>;
+          try {
+            result = await executeGeminiTool({
+              name: functionCall.name,
+              args: functionCall.args || {},
+            });
+          } catch (toolErr) {
+            console.error(
+              `[llmRouter] gemini-tool-error for ${functionCall.name}:`,
+              toolErr,
+            );
+            result = {
+              ok: false,
+              error: "Tool execution failed due to an internal error.",
+            };
+          }
 
           if (isDebug && hasGeminiFunctionTools) {
             console.warn("[llmRouter] gemini-tool-response", {
@@ -834,13 +824,23 @@ export async function generateTextWithMeta(
 
       if (!text) {
         usedFallback = true;
-        text = await finalizeGeminiWithoutTools({
-          gemini,
-          model: resolvedModel,
+        const finalContents = appendFallbackToHistory(
           contents,
-          systemInstruction: opts.systemInstruction,
+          buildFallbackContent(),
+          "contents",
+        );
+        text = await executeFinalFallbackCall(
+          provider,
+          resolvedModel,
           isDebug,
-        });
+          () =>
+            gemini.models.generateContent({
+              model: resolvedModel,
+              contents: finalContents,
+              config: { systemInstruction: opts.systemInstruction },
+            }),
+          (res) => res.text || "",
+        );
       }
     }
   }

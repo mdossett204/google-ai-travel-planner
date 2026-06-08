@@ -180,10 +180,15 @@ function parseStringArray(
   fieldName: string,
   { maxLength = 100 }: { maxLength?: number } = {},
 ): string[] {
-  if (
-    !Array.isArray(value) ||
-    !value.every((item) => typeof item === "string")
-  ) {
+  if (!Array.isArray(value)) {
+    throw new RequestValidationError(`${fieldName} must be an array.`);
+  }
+
+  if (value.length > 50) {
+    throw new RequestValidationError(`${fieldName} cannot exceed 50 items.`);
+  }
+
+  if (!value.every((item) => typeof item === "string")) {
     throw new RequestValidationError(
       `${fieldName} must be an array of strings.`,
     );

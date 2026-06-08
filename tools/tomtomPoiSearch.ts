@@ -5,19 +5,13 @@ import { assertRedisConfigured } from "../utils/redis.js";
 import {
   handleApiError,
   sendJson,
+  enforcePostMethod,
   type ApiRequest,
   type ApiResponse,
 } from "../utils/apiHelpers.js";
 
 export default async function handler(req: ApiRequest, res: ApiResponse) {
-  if (req.method === "OPTIONS") {
-    res.statusCode = 204;
-    return res.end();
-  }
-
-  if (req.method !== "POST") {
-    return sendJson(res, 405, { error: "Method not allowed" });
-  }
+  if (!enforcePostMethod(req, res)) return;
 
   try {
     assertTomTomApiKeyConfigured();
