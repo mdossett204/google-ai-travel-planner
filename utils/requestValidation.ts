@@ -534,12 +534,14 @@ export function validateRecommendationsResponse(raw: unknown) {
   return raw.map((item, index) => {
     const recommendation = validateRecommendation(item);
 
-    if (
-      recommendation.highlights.length < 3 ||
-      recommendation.highlights.length > 4
-    ) {
+    // Models sometimes generate more highlights than requested. Truncate to 3.
+    if (recommendation.highlights.length > 3) {
+      recommendation.highlights = recommendation.highlights.slice(0, 3);
+    }
+
+    if (recommendation.highlights.length < 3) {
       throw new RequestValidationError(
-        `recommendation[${index}].highlights must contain 3 to 4 items.`,
+        `recommendation[${index}].highlights must contain exactly 3 items.`,
       );
     }
 
