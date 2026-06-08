@@ -64,6 +64,73 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+const ALLOWED_PRIMARY_GOALS = [
+  "Relaxation",
+  "Adventure",
+  "Hiking",
+  "Cultural Exploration",
+  "Nature & Wildlife",
+  "Food & Culinary",
+  "Party & Nightlife",
+] as const;
+
+const ALLOWED_TRANSPORT_OPTIONS = [
+  "Public Transit",
+  "Rental Car",
+  "Walking/Biking",
+  "Taxis/Rideshare",
+  "Own Car",
+] as const;
+
+const ALLOWED_DIETARY_RESTRICTIONS = [
+  "Vegan",
+  "Vegetarian",
+  "Gluten-Free",
+  "Dairy-Free",
+  "Nut-Free",
+  "Halal",
+  "Kosher",
+  "Paleo",
+  "Carnivore",
+  "No Restrictions",
+] as const;
+
+const ALLOWED_CUISINE_INTERESTS = [
+  "Seafood",
+  "Regional Specialties",
+  "Ethnic",
+  "Street Food",
+  "Cafe/Bakery",
+  "No Preference",
+] as const;
+
+const ALLOWED_DINING_STYLES = [
+  "Casual",
+  "Quick Meals",
+  "Family-Friendly",
+  "Scenic Dining",
+  "Fine Dining",
+] as const;
+
+const ALLOWED_FOOD_PLACE_TYPES = [
+  "Restaurants",
+  "Cafes/Bakeries",
+  "Grocery Stores",
+] as const;
+
+const ALLOWED_LODGING_TYPES = [
+  "Hotel",
+  "Boutique Hotel",
+  "Vacation Rental",
+  "Bed & Breakfast",
+  "Resort",
+  "Hostel",
+] as const;
+
+const MAX_BUDGET = 20000;
+const MAX_DURATION_VALUE = 14;
+const MAX_TOMTOM_LIMIT = 20;
+
 function requireRecord(value: unknown, fieldName: string) {
   if (!isRecord(value)) {
     throw new RequestValidationError(`${fieldName} must be an object.`);
@@ -74,7 +141,10 @@ function requireRecord(value: unknown, fieldName: string) {
 function parseString(
   value: unknown,
   fieldName: string,
-  { allowEmpty = true }: { allowEmpty?: boolean } = {},
+  {
+    allowEmpty = true,
+    maxLength = 100,
+  }: { allowEmpty?: boolean; maxLength?: number } = {},
 ) {
   if (typeof value !== "string") {
     throw new RequestValidationError(`${fieldName} must be a string.`);
@@ -84,32 +154,88 @@ function parseString(
     throw new RequestValidationError(`${fieldName} is required.`);
   }
 
+  if (value.length > maxLength) {
+    console.warn(
+      `[requestValidation] ${fieldName} exceeds maximum length of ${maxLength}. Truncating.`,
+    );
+    return value.substring(0, maxLength);
+  }
+
   return value;
 }
 
-function parseOptionalString(value: unknown, fieldName: string) {
+function parseOptionalString(
+  value: unknown,
+  fieldName: string,
+  options?: { maxLength?: number },
+) {
   if (typeof value === "undefined") {
     return "";
   }
-  return parseString(value, fieldName);
+  return parseString(value, fieldName, options);
 }
 
-function parseStringArray(value: unknown, fieldName: string) {
-  if (
-    !Array.isArray(value) ||
-    !value.every((item) => typeof item === "string")
-  ) {
+function parseStringArray(
+  value: unknown,
+  fieldName: string,
+  { maxLength = 100 }: { maxLength?: number } = {},
+): string[] {
+  if (!Array.isArray(value)) {
+    throw new RequestValidationError(`${fieldName} must be an array.`);
+  }
+
+  if (value.length > 50) {
+    throw new RequestValidationError(`${fieldName} cannot exceed 50 items.`);
+  }
+
+  if (!value.every((item) => typeof item === "string")) {
     throw new RequestValidationError(
       `${fieldName} must be an array of strings.`,
     );
   }
 
-  return value;
+  let hasTruncated = false;
+  const stringArray = value as string[];
+  const result = stringArray.map((item) => {
+    if (item.length > maxLength) {
+      hasTruncated = true;
+      return item.substring(0, maxLength);
+    }
+    return item;
+  });
+
+  if (hasTruncated) {
+    console.warn(
+      `[requestValidation] One or more items in ${fieldName} exceeded maximum length of ${maxLength}. Truncated.`,
+    );
+  }
+
+  return result;
 }
 
-function parseOptionalStringArray(value: unknown, fieldName: string) {
+function parseOptionalStringArray(
+  value: unknown,
+  fieldName: string,
+  options?: { maxLength?: number },
+) {
   if (typeof value === "undefined") return [];
-  return parseStringArray(value, fieldName);
+  return parseStringArray(value, fieldName, options);
+}
+
+function parseOptionalStringEnumArray<T extends string>(
+  value: unknown,
+  fieldName: string,
+  allowedValues: readonly T[],
+) {
+  const values = parseOptionalStringArray(value, fieldName);
+  for (const item of values) {
+    if (!allowedValues.includes(item as T)) {
+      throw new RequestValidationError(
+        `${fieldName} must contain only: ${allowedValues.join(", ")}.`,
+      );
+    }
+  }
+  return values as T[];
 }
 
 function parseOptionalBoolean(
@@ -138,23 +264,39 @@ function parseStringEnum<T extends string>(
   return value as T;
 }
 
-function parsePositiveNumber(value: unknown, fieldName: string) {
+function parsePositiveNumber(
+  value: unknown,
+  fieldName: string,
+  { max }: { max?: number } = {},
+) {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
     throw new RequestValidationError(`${fieldName} must be a positive number.`);
   }
-
+  if (max !== undefined && value > max) {
+    throw new RequestValidationError(`${fieldName} cannot exceed ${max}.`);
+  }
   return value;
 }
 
-function parseOptionalNumber(value: unknown, fieldName: string) {
+function parseOptionalNumber(
+  value: unknown,
+  fieldName: string,
+  { min, max }: { min?: number; max?: number } = {},
+) {
   if (typeof value === "undefined" || value === "" || value === null) {
     return undefined;
   }
-
   if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new RequestValidationError(`${fieldName} must be a number.`);
   }
-
+  if (min !== undefined && value < min) {
+    throw new RequestValidationError(
+      `${fieldName} cannot be less than ${min}.`,
+    );
+  }
+  if (max !== undefined && value > max) {
+    throw new RequestValidationError(`${fieldName} cannot exceed ${max}.`);
+  }
   return value;
 }
 
@@ -190,13 +332,36 @@ export function validateTravelFormData(raw: unknown): ValidatedTravelFormData {
       ? input.lodgingPreferences
       : {};
 
+  const durationValue = parsePositiveNumber(
+    input.durationValue,
+    "durationValue",
+    { max: MAX_DURATION_VALUE },
+  );
+  const durationUnit = parseStringEnum(input.durationUnit, "durationUnit", [
+    "days",
+    "weeks",
+  ]);
+  if (durationUnit === "weeks" && durationValue > 2) {
+    throw new RequestValidationError("Duration cannot exceed 2 weeks.");
+  }
+
   return {
-    timeOfYear: parseStringArray(input.timeOfYear, "timeOfYear"),
-    durationValue: parsePositiveNumber(input.durationValue, "durationValue"),
-    durationUnit: parseStringEnum(input.durationUnit, "durationUnit", [
-      "days",
-      "weeks",
+    timeOfYear: parseOptionalStringEnumArray(input.timeOfYear, "timeOfYear", [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
     ]),
+    durationValue,
+    durationUnit,
     travelers: parseStringEnum(input.travelers, "travelers", [
       "Solo",
       "Couple",
@@ -215,31 +380,49 @@ export function validateTravelFormData(raw: unknown): ValidatedTravelFormData {
             "",
           ]),
     budget: {
-      lodging: parseOptionalNumber(budget.lodging, "budget.lodging"),
+      lodging: parseOptionalNumber(budget.lodging, "budget.lodging", {
+        min: 0,
+        max: MAX_BUDGET,
+      }),
       localTransportation: parseOptionalNumber(
         budget.localTransportation,
         "budget.localTransportation",
+        { min: 0, max: MAX_BUDGET },
       ),
-      food: parseOptionalNumber(budget.food, "budget.food"),
-      misc: parseOptionalNumber(budget.misc, "budget.misc"),
+      food: parseOptionalNumber(budget.food, "budget.food", {
+        min: 0,
+        max: MAX_BUDGET,
+      }),
+      misc: parseOptionalNumber(budget.misc, "budget.misc", {
+        min: 0,
+        max: MAX_BUDGET,
+      }),
     },
-    primaryGoal: parseStringArray(input.primaryGoal, "primaryGoal"),
+    primaryGoal: parseOptionalStringEnumArray(
+      input.primaryGoal,
+      "primaryGoal",
+      ALLOWED_PRIMARY_GOALS,
+    ),
     foodPreferences: {
-      dietaryRestrictions: parseOptionalStringArray(
+      dietaryRestrictions: parseOptionalStringEnumArray(
         foodPreferences.dietaryRestrictions,
         "foodPreferences.dietaryRestrictions",
+        ALLOWED_DIETARY_RESTRICTIONS,
       ),
-      cuisineInterests: parseOptionalStringArray(
+      cuisineInterests: parseOptionalStringEnumArray(
         foodPreferences.cuisineInterests,
         "foodPreferences.cuisineInterests",
+        ALLOWED_CUISINE_INTERESTS,
       ),
-      diningStyle: parseOptionalStringArray(
+      diningStyle: parseOptionalStringEnumArray(
         foodPreferences.diningStyle,
         "foodPreferences.diningStyle",
+        ALLOWED_DINING_STYLES,
       ),
-      foodPlaceTypes: parseOptionalStringArray(
+      foodPlaceTypes: parseOptionalStringEnumArray(
         foodPreferences.foodPlaceTypes,
         "foodPreferences.foodPlaceTypes",
+        ALLOWED_FOOD_PLACE_TYPES,
       ),
       foodPriority: includeFood
         ? parseStringEnum(
@@ -256,14 +439,16 @@ export function validateTravelFormData(raw: unknown): ValidatedTravelFormData {
             ),
     },
     lodgingPreferences: {
-      lodgingTypes: parseOptionalStringArray(
+      lodgingTypes: parseOptionalStringEnumArray(
         lodgingPreferences.lodgingTypes,
         "lodgingPreferences.lodgingTypes",
+        ALLOWED_LODGING_TYPES,
       ),
     },
-    localTransportation: parseStringArray(
+    localTransportation: parseOptionalStringEnumArray(
       input.localTransportation,
       "localTransportation",
+      ALLOWED_TRANSPORT_OPTIONS,
     ),
     preferredLocation: {
       country: parseString(
@@ -273,10 +458,9 @@ export function validateTravelFormData(raw: unknown): ValidatedTravelFormData {
           allowEmpty: false,
         },
       ),
-      stateOrProvince: parseString(
+      stateOrProvince: parseOptionalString(
         preferredLocation.stateOrProvince,
         "preferredLocation.stateOrProvince",
-        { allowEmpty: true },
       ),
       city: parseOptionalString(
         preferredLocation.city,
@@ -286,6 +470,7 @@ export function validateTravelFormData(raw: unknown): ValidatedTravelFormData {
     attractionInterests: parseOptionalString(
       input.attractionInterests,
       "attractionInterests",
+      { maxLength: 100 },
     ),
   };
 }
@@ -294,21 +479,28 @@ export function validateRecommendation(raw: unknown): ValidatedRecommendation {
   const input = requireRecord(raw, "recommendation");
 
   return {
-    id: parseString(input.id, "recommendation.id", { allowEmpty: false }),
-    title: parseString(input.title, "recommendation.title", {
+    id: parseString(String(input.id ?? ""), "recommendation.id", {
       allowEmpty: false,
     }),
-    description: parseString(input.description, "recommendation.description", {
+    title: parseString(String(input.title ?? ""), "recommendation.title", {
       allowEmpty: false,
     }),
+    description: parseString(
+      String(input.description ?? ""),
+      "recommendation.description",
+      {
+        allowEmpty: false,
+        maxLength: 1000,
+      },
+    ),
     highlights: parseStringArray(input.highlights, "recommendation.highlights"),
     estimatedCost: parseString(
-      input.estimatedCost,
+      String(input.estimatedCost ?? ""),
       "recommendation.estimatedCost",
       { allowEmpty: false },
     ),
     bestTimeToGo: parseString(
-      input.bestTimeToGo,
+      String(input.bestTimeToGo ?? ""),
       "recommendation.bestTimeToGo",
       { allowEmpty: false },
     ),
@@ -342,12 +534,14 @@ export function validateRecommendationsResponse(raw: unknown) {
   return raw.map((item, index) => {
     const recommendation = validateRecommendation(item);
 
-    if (
-      recommendation.highlights.length < 3 ||
-      recommendation.highlights.length > 4
-    ) {
+    // Models sometimes generate more highlights than requested. Truncate to 3.
+    if (recommendation.highlights.length > 3) {
+      recommendation.highlights = recommendation.highlights.slice(0, 3);
+    }
+
+    if (recommendation.highlights.length < 3) {
       throw new RequestValidationError(
-        `recommendation[${index}].highlights must contain 3 to 4 items.`,
+        `recommendation[${index}].highlights must contain exactly 3 items.`,
       );
     }
 
@@ -360,19 +554,23 @@ export function validateTomTomPoiSearchRequest(
 ): ValidatedTomTomPoiSearchRequest {
   const input = requireRecord(raw, "Request body");
   const query = parseString(input.query, "query", { allowEmpty: false }).trim();
-  const limit =
-    typeof input.limit === "undefined"
-      ? 5
-      : parseOptionalNumber(input.limit, "limit");
+  const limitRaw = parseOptionalNumber(input.limit, "limit", {
+    min: 1,
+    max: MAX_TOMTOM_LIMIT,
+  });
 
-  if (!limit || limit <= 0) {
-    throw new RequestValidationError("limit must be a positive number.");
-  }
+  const limit: number = limitRaw ?? 5;
 
   return {
     query,
     limit,
-    latitude: parseOptionalNumber(input.latitude, "latitude"),
-    longitude: parseOptionalNumber(input.longitude, "longitude"),
+    latitude: parseOptionalNumber(input.latitude, "latitude", {
+      min: -90,
+      max: 90,
+    }),
+    longitude: parseOptionalNumber(input.longitude, "longitude", {
+      min: -180,
+      max: 180,
+    }),
   };
 }

@@ -106,7 +106,6 @@ export default function Recommendations({
           >
             <div className="h-48 bg-slate-100 relative overflow-hidden">
               <RecommendationImage title={rec.title} />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
               <div className="absolute bottom-4 left-4 right-4">
                 <h3 className="text-xl font-bold text-white leading-tight">
                   {rec.title}
@@ -134,9 +133,9 @@ export default function Recommendations({
                     Highlights
                   </h4>
                   <ul className="space-y-2">
-                    {rec.highlights.map((highlight, idx) => (
+                    {rec.highlights.map((highlight) => (
                       <li
-                        key={idx}
+                        key={highlight}
                         className="flex items-start gap-2 text-sm text-slate-700"
                       >
                         <CheckCircle2

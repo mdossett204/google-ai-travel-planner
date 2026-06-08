@@ -1,4 +1,5 @@
 import { getRedisClient, runFixedWindowRateLimit } from "../utils/redis.js";
+import { sleep } from "../utils/apiHelpers.js";
 
 export interface TomTomSearchOptions {
   query: string;
@@ -39,12 +40,25 @@ const TOMTOM_CACHE_TTL_MS = 5 * 60 * 1000;
 const TOMTOM_REDIS_CACHE_TTL_SEC = 30 * 24 * 60 * 60; // 30 days
 
 let lastTomTomRequestAt = 0;
+// Serverless note: This queue limits concurrency per function instance, not globally across all instances.
 let tomTomQueue: Promise<void> = Promise.resolve();
 
 const tomTomCache = new Map<
   string,
   { expiresAt: number; results: TomTomSearchResult[] }
 >();
+
+function evictLeastRecentlyUsed() {
+  if (tomTomCache.size <= 1000) return;
+
+  const entriesToDelete = Math.ceil(tomTomCache.size * 0.2); // Remove LRU 20%
+  let deletedCount = 0;
+  for (const key of tomTomCache.keys()) {
+    tomTomCache.delete(key);
+    deletedCount++;
+    if (deletedCount >= entriesToDelete) break;
+  }
+}
 
 export class TomTomConfigurationError extends Error {
   constructor(message: string) {
@@ -65,10 +79,6 @@ export function assertTomTomApiKeyConfigured() {
 
 function isDebugEnabled() {
   return process.env.DEBUG_LLM_ROUTER === "true";
-}
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function buildCacheKey({
@@ -95,9 +105,9 @@ function buildCacheKey({
 async function waitForTomTomSlot() {
   const success = await runFixedWindowRateLimit("tomtom-global-limit", 5, 1);
   if (!success) {
-    const error: any = new Error("TomTom global rate limit exceeded");
-    error.status = 429;
-    throw error;
+    throw Object.assign(new Error("TomTom global rate limit exceeded"), {
+      status: 429,
+    });
   }
 
   const previous = tomTomQueue;
@@ -118,38 +128,137 @@ async function waitForTomTomSlot() {
   release();
 }
 
-function normalizeSearchResult(result: any): TomTomSearchResult {
+function normalizeSearchResult(rawResult: unknown): TomTomSearchResult {
+  const result = rawResult as Record<string, unknown>;
+  const poi = (result?.poi || {}) as Record<string, unknown>;
+  const address = (result?.address || {}) as Record<string, unknown>;
+  const position = (result?.position || {}) as Record<string, unknown>;
+
   return {
-    id: result?.id || "",
-    name: result?.poi?.name || "",
-    address: result?.address?.freeformAddress || "",
-    city: result?.address?.municipality || "",
-    region: result?.address?.countrySubdivisionName || "",
-    country: result?.address?.country || "",
-    website: result?.poi?.url || "",
-    phone: result?.poi?.phone || "",
-    categories: Array.isArray(result?.poi?.categories)
-      ? result.poi.categories
-      : [],
-    lat: typeof result?.position?.lat === "number" ? result.position.lat : null,
-    lon: typeof result?.position?.lon === "number" ? result.position.lon : null,
+    id: (result?.id as string) || "",
+    name: (poi?.name as string) || "",
+    address: (address?.freeformAddress as string) || "",
+    city: (address?.municipality as string) || "",
+    region: (address?.countrySubdivisionName as string) || "",
+    country: (address?.country as string) || "",
+    website: (poi?.url as string) || "",
+    phone: (poi?.phone as string) || "",
+    categories: Array.isArray(poi?.categories) ? poi.categories : [],
+    lat: typeof position?.lat === "number" ? position.lat : null,
+    lon: typeof position?.lon === "number" ? position.lon : null,
     score: typeof result?.score === "number" ? result.score : null,
   };
 }
 
+function normalizeForMatch(s: string): string {
+  return s
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .trim();
+}
+
 export function isTomTomResultMatch({
   placeName,
-  locationHint = "",
+  locationHint,
   result,
 }: TomTomMatchOptions) {
-  void placeName;
-  void locationHint;
-
   if (!result || !result.name.trim()) {
     return false;
   }
 
+  const normalizedPlace = normalizeForMatch(placeName);
+  const normalizedResult = normalizeForMatch(result.name);
+
+  if (!normalizedPlace) return false;
+
+  const placeTokens = normalizedPlace.split(/\s+/).filter(Boolean);
+  const resultTokens = normalizedResult.split(/\s+/).filter(Boolean);
+
+  if (placeTokens.length === 0 || resultTokens.length === 0) return false;
+
+  // 1. Strict Name Match: Token overlap must be strictly > 50%
+  const intersection = placeTokens.filter((t) => resultTokens.includes(t));
+  const overlapRatio = intersection.length / placeTokens.length;
+
+  let isNameMatch = overlapRatio > 0.5;
+
+  // Substring fallback for single-word queries matching multi-word results
+  // e.g. "Louvre" matches "The Louvre Museum"
+  if (
+    !isNameMatch &&
+    placeTokens.length === 1 &&
+    normalizedResult.includes(normalizedPlace)
+  ) {
+    isNameMatch = true;
+  }
+
+  if (!isNameMatch) return false;
+
+  // 2. Geographic Match
+  if (locationHint) {
+    const hintTokens = normalizeForMatch(locationHint)
+      .split(/\s+/)
+      .filter((t) => t.length > 1); // Ignore single letters
+
+    if (hintTokens.length > 0) {
+      const geoString = normalizeForMatch(
+        [result.city, result.region, result.country, result.address].join(" "),
+      );
+
+      // The result must contain at least one significant word from the location hint
+      const hasGeoMatch = hintTokens.some((t) => geoString.includes(t));
+      if (!hasGeoMatch) return false;
+    }
+  }
+
   return true;
+}
+
+export async function executeSearchPlace(
+  args: Record<string, unknown>,
+  debugLabel: string,
+): Promise<Record<string, unknown>> {
+  const placeName = typeof args.name === "string" ? args.name.trim() : "";
+  const locationHint =
+    typeof args.locationHint === "string" ? args.locationHint.trim() : "";
+
+  if (!placeName) {
+    return {
+      ok: false,
+      error: "Missing required argument: name",
+    };
+  }
+
+  const query = [placeName, locationHint].filter(Boolean).join(" ");
+  const results = await searchTomTom({ query, limit: 1 });
+  const result = results[0] || null;
+  const isMatch = isTomTomResultMatch({ placeName, locationHint, result });
+
+  if (isDebugEnabled()) {
+    console.warn(`[${debugLabel}] search_place-result`, {
+      query,
+      isMatch,
+      result,
+    });
+  }
+
+  if (!isMatch) {
+    return {
+      ok: false,
+      query,
+      error:
+        "Top search result did not match the requested place closely enough.",
+      result: null,
+    };
+  }
+
+  return {
+    ok: true,
+    query,
+    result,
+  };
 }
 
 export async function searchTomTom({
@@ -176,6 +285,9 @@ export async function searchTomTom({
         query: trimmedQuery,
       });
     }
+    // LRU Trick: Delete and immediately re-set to bump it to the end of the Map
+    tomTomCache.delete(cacheKey);
+    tomTomCache.set(cacheKey, cached);
     return cached.results;
   }
 
@@ -190,7 +302,7 @@ export async function searchTomTom({
           query: trimmedQuery,
         });
       }
-      if (tomTomCache.size > 1000) tomTomCache.clear();
+      evictLeastRecentlyUsed();
       tomTomCache.set(cacheKey, {
         expiresAt: Date.now() + TOMTOM_CACHE_TTL_MS,
         results: parsedResults,
@@ -201,23 +313,24 @@ export async function searchTomTom({
     console.warn("[tomtomSearch] redis-cache-read-error", err);
   }
 
-  const params = new URLSearchParams({
-    key: assertTomTomApiKeyConfigured(),
+  const apiKey = assertTomTomApiKeyConfigured();
+  const safeParams = new URLSearchParams({
     limit: String(limit),
   });
 
   if (typeof latitude === "number" && typeof longitude === "number") {
-    params.set("lat", String(latitude));
-    params.set("lon", String(longitude));
+    safeParams.set("lat", String(latitude));
+    safeParams.set("lon", String(longitude));
   }
 
   const encodedQuery = encodeURIComponent(trimmedQuery);
-  const url = `https://api.tomtom.com/search/2/poiSearch/${encodedQuery}.json?${params.toString()}`;
+  const safeUrl = `https://api.tomtom.com/search/2/poiSearch/${encodedQuery}.json?${safeParams.toString()}`;
+  const fetchUrl = `${safeUrl}&key=${apiKey}`;
 
   if (isDebugEnabled()) {
     console.warn("[tomtomSearch] request", {
       query: trimmedQuery,
-      url,
+      url: safeUrl,
     });
   }
   let results: TomTomSearchResult[] = [];
@@ -225,20 +338,38 @@ export async function searchTomTom({
   for (let attempt = 0; attempt < TOMTOM_MAX_RETRIES; attempt += 1) {
     await waitForTomTomSlot();
 
-    const response = await fetch(url, {
-      method: "GET",
-      headers: { Accept: "application/json" },
-    });
+    let response: Response;
+    try {
+      response = await fetch(fetchUrl, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+      });
+    } catch (networkError) {
+      const errorMessage =
+        networkError instanceof Error
+          ? networkError.message
+          : String(networkError);
+      const safeMessage = errorMessage.split(apiKey).join("***REDACTED***");
+
+      console.error(
+        "[tomtomSearch] network error:",
+        safeMessage,
+        "for URL:",
+        safeUrl,
+      );
+
+      // Catch low-level crashes to prevent the raw URL and API key from leaking into stack traces
+      throw new Error(
+        "A network error occurred while connecting to the TomTom API.",
+      );
+    }
 
     if (response.ok) {
       const payload = (await response.json()) as TomTomSearchResponse;
       const rawResults = Array.isArray(payload.results) ? payload.results : [];
-      results = rawResults.map(normalizeSearchResult);
+      results = rawResults.map((r) => normalizeSearchResult(r));
 
-      // Prevent memory leaks in warm serverless containers
-      if (tomTomCache.size > 1000) {
-        tomTomCache.clear();
-      }
+      evictLeastRecentlyUsed();
       tomTomCache.set(cacheKey, {
         expiresAt: Date.now() + TOMTOM_CACHE_TTL_MS,
         results,
@@ -253,10 +384,12 @@ export async function searchTomTom({
     }
 
     const details = await response.text().catch(() => "");
-    if (response.status !== 429 || attempt === TOMTOM_MAX_RETRIES - 1) {
-      throw new Error(
-        `TomTom search failed with ${response.status}${details ? `: ${details}` : ""}`,
-      );
+    const isRetryable =
+      response.status === 429 ||
+      (response.status >= 500 && response.status <= 504);
+    if (!isRetryable || attempt === TOMTOM_MAX_RETRIES - 1) {
+      console.error(`[tomtomSearch] API Error ${response.status}:`, details);
+      throw new Error(`TomTom search failed with status ${response.status}`);
     }
 
     const delayMs = TOMTOM_RETRY_BASE_DELAY_MS * 2 ** attempt;

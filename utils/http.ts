@@ -22,19 +22,34 @@ function assertBodySizeWithinLimit(byteLength: number) {
   }
 }
 
+function parseJsonSafely(bodyText: string) {
+  if (!bodyText.trim()) {
+    throw new InvalidJsonBodyError("Request body is required.");
+  }
+  try {
+    return JSON.parse(bodyText);
+  } catch {
+    throw new InvalidJsonBodyError("Request body must be valid JSON.");
+  }
+}
+
 export async function readJsonBody(req: any) {
+  const contentLength = req.headers?.["content-length"];
+  if (contentLength) {
+    const parsedLength = parseInt(contentLength, 10);
+    if (isNaN(parsedLength) || parsedLength > MAX_JSON_BODY_BYTES) {
+      throw new RequestBodyTooLargeError(
+        `Request body must be valid and ${MAX_JSON_BODY_BYTES} bytes or smaller.`,
+      );
+    }
+  }
+
   if (req.body) {
     if (typeof req.body === "string") {
       assertBodySizeWithinLimit(Buffer.byteLength(req.body, "utf8"));
-      try {
-        return JSON.parse(req.body || "{}");
-      } catch {
-        throw new InvalidJsonBodyError("Request body must be valid JSON.");
-      }
+      return parseJsonSafely(req.body);
     }
 
-    const serializedBody = JSON.stringify(req.body ?? {});
-    assertBodySizeWithinLimit(Buffer.byteLength(serializedBody, "utf8"));
     return req.body;
   }
 
@@ -48,9 +63,5 @@ export async function readJsonBody(req: any) {
     body += chunkString;
   }
 
-  try {
-    return JSON.parse(body || "{}");
-  } catch {
-    throw new InvalidJsonBodyError("Request body must be valid JSON.");
-  }
+  return parseJsonSafely(body);
 }

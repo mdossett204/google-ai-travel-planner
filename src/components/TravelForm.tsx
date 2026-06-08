@@ -167,6 +167,137 @@ const exclusiveOptionByField = {
   foodPlaceTypes: "",
 } as const;
 
+const FOOD_PREFERENCE_SECTIONS = [
+  {
+    key: "foodPlaceTypes",
+    label: "Food stops",
+    options: foodPlaceTypeOptions,
+  },
+  {
+    key: "dietaryRestrictions",
+    label: "Dietary restrictions",
+    options: dietaryRestrictionOptions,
+  },
+  {
+    key: "cuisineInterests",
+    label: "Cuisine interests",
+    options: cuisineInterestOptions,
+  },
+  { key: "diningStyle", label: "Dining style", options: diningStyleOptions },
+] as const;
+
+function ToggleGroup({
+  options,
+  selected,
+  onToggle,
+  hasError,
+}: {
+  options: readonly string[] | string[];
+  selected: string | string[];
+  onToggle: (val: string) => void;
+  hasError?: boolean;
+}) {
+  const isArray = Array.isArray(selected);
+  return (
+    <div className="flex flex-wrap gap-2">
+      {options.map((option) => {
+        const isSelected = isArray
+          ? selected.includes(option)
+          : selected === option;
+        return (
+          <button
+            key={option}
+            type="button"
+            onClick={() => onToggle(option)}
+            className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${
+              isSelected
+                ? "bg-emerald-100 border-emerald-500 text-emerald-800"
+                : hasError
+                  ? "bg-white border-red-300 text-slate-700 hover:border-red-400"
+                  : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
+            }`}
+            aria-pressed={isSelected}
+          >
+            {option}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function BudgetInput({
+  id,
+  label,
+  subtitle,
+  value,
+  onChange,
+  placeholder,
+}: {
+  id: string;
+  label: string;
+  subtitle?: string;
+  value: number | "";
+  onChange: (val: number | "") => void;
+  placeholder: string;
+}) {
+  return (
+    <div className="space-y-1">
+      <label htmlFor={id} className="text-xs text-slate-500">
+        {label}
+      </label>
+      {subtitle && <p className="text-xs text-slate-400">{subtitle}</p>}
+      <div className="relative">
+        <span className="absolute left-3 top-2.5 text-slate-500">$</span>
+        <input
+          id={id}
+          type="number"
+          min="0"
+          max="20000"
+          value={value}
+          onChange={(e) => {
+            const val = e.target.valueAsNumber;
+            onChange(Number.isNaN(val) ? "" : val);
+          }}
+          className="w-full rounded-xl border border-slate-300 bg-white pl-8 pr-4 py-2 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
+          placeholder={placeholder}
+        />
+      </div>
+    </div>
+  );
+}
+
+function LocationInput({
+  id,
+  ariaLabel,
+  value,
+  onChange,
+  required,
+  placeholder,
+}: {
+  id?: string;
+  ariaLabel?: string;
+  value: string;
+  onChange: (val: string) => void;
+  required?: boolean;
+  placeholder: string;
+}) {
+  return (
+    <input
+      id={id}
+      aria-label={ariaLabel}
+      type="text"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      required={required}
+      pattern=".{0,100}"
+      title="Needs to be under 100 characters."
+      placeholder={placeholder}
+      className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
+    />
+  );
+}
+
 export default function TravelForm({
   onSubmit,
   isLoading,
@@ -316,10 +447,6 @@ export default function TravelForm({
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
 
-    if (formData.timeOfYear.length === 0) {
-      setValidationError("Please select at least one Time of Year.");
-      return;
-    }
     if (formData.primaryGoal.length === 0) {
       setValidationError("Please select at least one Primary Goal.");
       return;
@@ -363,23 +490,11 @@ export default function TravelForm({
                 (Select months)
               </span>
             </label>
-            <div className="flex flex-wrap gap-2">
-              {monthOptions.map((month) => (
-                <button
-                  key={month}
-                  type="button"
-                  onClick={() => handleArrayToggle("timeOfYear", month)}
-                  className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${
-                    formData.timeOfYear.includes(month)
-                      ? "bg-emerald-100 border-emerald-500 text-emerald-800"
-                      : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
-                  }`}
-                  aria-pressed={formData.timeOfYear.includes(month)}
-                >
-                  {month}
-                </button>
-              ))}
-            </div>
+            <ToggleGroup
+              options={monthOptions}
+              selected={formData.timeOfYear}
+              onToggle={(val) => handleArrayToggle("timeOfYear", val)}
+            />
           </div>
 
           <div className="space-y-2">
@@ -394,6 +509,7 @@ export default function TravelForm({
                 id="durationValue"
                 type="number"
                 min="1"
+                max={formData.durationUnit === "weeks" ? 2 : 14}
                 step="1"
                 required
                 value={formData.durationValue}
@@ -410,12 +526,20 @@ export default function TravelForm({
               <select
                 aria-label="Duration unit"
                 value={formData.durationUnit}
-                onChange={(e) =>
-                  setFormData((p) => ({
-                    ...p,
-                    durationUnit: e.target.value as "days" | "weeks",
-                  }))
-                }
+                onChange={(e) => {
+                  const unit = e.target.value as "days" | "weeks";
+                  setFormData((p) => {
+                    const newMax = unit === "weeks" ? 2 : 14;
+                    const currentVal =
+                      typeof p.durationValue === "number" ? p.durationValue : 0;
+                    return {
+                      ...p,
+                      durationUnit: unit,
+                      durationValue:
+                        currentVal > newMax ? newMax : p.durationValue,
+                    };
+                  });
+                }}
                 className="w-1/3 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
               >
                 <option value="days">Days</option>
@@ -497,137 +621,65 @@ export default function TravelForm({
 
           <div className="space-y-3 md:col-span-2">
             <label className="block text-sm font-medium text-slate-700">
-              Detailed Budget (USD)
+              Detailed Budget (USD){" "}
+              <span className="text-slate-400 font-normal">
+                (Max $20,000 per category)
+              </span>
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {formData.includeLodging ? (
-                <div className="space-y-1">
-                  <label
-                    htmlFor="budgetLodging"
-                    className="text-xs text-slate-500"
-                  >
-                    Lodging (per night)
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-2.5 text-slate-500">
-                      $
-                    </span>
-                    <input
-                      id="budgetLodging"
-                      type="number"
-                      min="0"
-                      value={formData.budget.lodging}
-                      onChange={(e) => {
-                        const val = e.target.valueAsNumber;
-                        setFormData((p) => ({
-                          ...p,
-                          budget: {
-                            ...p.budget,
-                            lodging: Number.isNaN(val) ? "" : val,
-                          },
-                        }));
-                      }}
-                      className="w-full rounded-xl border border-slate-300 bg-white pl-8 pr-4 py-2 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
-                      placeholder="e.g. 150"
-                    />
-                  </div>
-                </div>
+                <BudgetInput
+                  id="budgetLodging"
+                  label="Lodging (per night)"
+                  value={formData.budget.lodging}
+                  onChange={(val) =>
+                    setFormData((p) => ({
+                      ...p,
+                      budget: { ...p.budget, lodging: val },
+                    }))
+                  }
+                  placeholder="e.g. 150"
+                />
               ) : null}
-              <div className="space-y-1">
-                <label
-                  htmlFor="budgetLocalTransport"
-                  className="text-xs text-slate-500"
-                >
-                  Local Transportation (total)
-                </label>
-                <p className="text-xs text-slate-400">
-                  Once you are already at the destination.
-                </p>
-                <div className="relative">
-                  <span className="absolute left-3 top-2.5 text-slate-500">
-                    $
-                  </span>
-                  <input
-                    id="budgetLocalTransport"
-                    type="number"
-                    min="0"
-                    value={formData.budget.localTransportation}
-                    onChange={(e) => {
-                      const val = e.target.valueAsNumber;
-                      setFormData((p) => ({
-                        ...p,
-                        budget: {
-                          ...p.budget,
-                          localTransportation: Number.isNaN(val) ? "" : val,
-                        },
-                      }));
-                    }}
-                    className="w-full rounded-xl border border-slate-300 bg-white pl-8 pr-4 py-2 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
-                    placeholder="e.g. 120"
-                  />
-                </div>
-              </div>
+              <BudgetInput
+                id="budgetLocalTransport"
+                label="Local Transportation (total)"
+                subtitle="Once you are already at the destination."
+                value={formData.budget.localTransportation}
+                onChange={(val) =>
+                  setFormData((p) => ({
+                    ...p,
+                    budget: { ...p.budget, localTransportation: val },
+                  }))
+                }
+                placeholder="e.g. 120"
+              />
               {formData.includeFood ? (
-                <div className="space-y-1">
-                  <label
-                    htmlFor="budgetFood"
-                    className="text-xs text-slate-500"
-                  >
-                    Food (per day)
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-2.5 text-slate-500">
-                      $
-                    </span>
-                    <input
-                      id="budgetFood"
-                      type="number"
-                      min="0"
-                      value={formData.budget.food}
-                      onChange={(e) => {
-                        const val = e.target.valueAsNumber;
-                        setFormData((p) => ({
-                          ...p,
-                          budget: {
-                            ...p.budget,
-                            food: Number.isNaN(val) ? "" : val,
-                          },
-                        }));
-                      }}
-                      className="w-full rounded-xl border border-slate-300 bg-white pl-8 pr-4 py-2 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
-                      placeholder="e.g. 100"
-                    />
-                  </div>
-                </div>
+                <BudgetInput
+                  id="budgetFood"
+                  label="Food (per day)"
+                  value={formData.budget.food}
+                  onChange={(val) =>
+                    setFormData((p) => ({
+                      ...p,
+                      budget: { ...p.budget, food: val },
+                    }))
+                  }
+                  placeholder="e.g. 100"
+                />
               ) : null}
-              <div className="space-y-1">
-                <label htmlFor="budgetMisc" className="text-xs text-slate-500">
-                  Activities & Misc (total)
-                </label>
-                <div className="relative">
-                  <span className="absolute left-3 top-2.5 text-slate-500">
-                    $
-                  </span>
-                  <input
-                    id="budgetMisc"
-                    type="number"
-                    min="0"
-                    value={formData.budget.misc}
-                    onChange={(e) => {
-                      const val = e.target.valueAsNumber;
-                      setFormData((p) => ({
-                        ...p,
-                        budget: {
-                          ...p.budget,
-                          misc: Number.isNaN(val) ? "" : val,
-                        },
-                      }));
-                    }}
-                    className="w-full rounded-xl border border-slate-300 bg-white pl-8 pr-4 py-2 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
-                    placeholder="e.g. 300"
-                  />
-                </div>
-              </div>
+              <BudgetInput
+                id="budgetMisc"
+                label="Activities & Misc (total)"
+                value={formData.budget.misc}
+                onChange={(val) =>
+                  setFormData((p) => ({
+                    ...p,
+                    budget: { ...p.budget, misc: val },
+                  }))
+                }
+                placeholder="e.g. 300"
+              />
             </div>
           </div>
 
@@ -638,23 +690,11 @@ export default function TravelForm({
                 (Select multiple)
               </span>
             </label>
-            <div className="flex flex-wrap gap-2">
-              {goalOptions.map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  onClick={() => handleArrayToggle("primaryGoal", option)}
-                  className={`px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${
-                    formData.primaryGoal.includes(option)
-                      ? "bg-emerald-100 border-emerald-500 text-emerald-800"
-                      : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
-                  }`}
-                  aria-pressed={formData.primaryGoal.includes(option)}
-                >
-                  {option}
-                </button>
-              ))}
-            </div>
+            <ToggleGroup
+              options={goalOptions}
+              selected={formData.primaryGoal}
+              onToggle={(val) => handleArrayToggle("primaryGoal", val)}
+            />
           </div>
 
           <div className="space-y-3 md:col-span-2">
@@ -665,29 +705,19 @@ export default function TravelForm({
             <p className="text-xs text-slate-500">
               Helps set the pacing: packed days vs plenty of downtime.
             </p>
-            <div className="flex flex-wrap gap-2">
-              {activityLevelOptions.map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  onClick={() =>
-                    setFormData((prev) => ({
-                      ...prev,
-                      activityLevel:
-                        prev.activityLevel === option ? "" : option,
-                    }))
-                  }
-                  className={`px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${
-                    formData.activityLevel === option
-                      ? "bg-emerald-100 border-emerald-500 text-emerald-800"
-                      : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
-                  }`}
-                  aria-pressed={formData.activityLevel === option}
-                >
-                  {option}
-                </button>
-              ))}
-            </div>
+            <ToggleGroup
+              options={activityLevelOptions}
+              selected={formData.activityLevel}
+              onToggle={(val) =>
+                setFormData((prev) => ({
+                  ...prev,
+                  activityLevel:
+                    prev.activityLevel === val
+                      ? ""
+                      : (val as typeof formData.activityLevel),
+                }))
+              }
+            />
           </div>
 
           <div className="space-y-3 md:col-span-2">
@@ -701,25 +731,11 @@ export default function TravelForm({
               Choose how you want to move around after arriving at the
               destination.
             </p>
-            <div className="flex flex-wrap gap-2">
-              {transportOptions.map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  onClick={() =>
-                    handleArrayToggle("localTransportation", option)
-                  }
-                  className={`px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${
-                    formData.localTransportation.includes(option)
-                      ? "bg-emerald-100 border-emerald-500 text-emerald-800"
-                      : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
-                  }`}
-                  aria-pressed={formData.localTransportation.includes(option)}
-                >
-                  {option}
-                </button>
-              ))}
-            </div>
+            <ToggleGroup
+              options={transportOptions}
+              selected={formData.localTransportation}
+              onToggle={(val) => handleArrayToggle("localTransportation", val)}
+            />
           </div>
         </div>
 
@@ -733,42 +749,32 @@ export default function TravelForm({
             </label>
             <p className="text-xs text-slate-500 mb-2">
               Country is required. State/province and city are optional (useful
-              for multi-state destinations like national parks).
+              for multi-state destinations like national parks). Max 100
+              characters per field.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <input
+              <LocationInput
                 id="locationCountry"
-                type="text"
                 value={formData.preferredLocation.country}
-                onChange={(e) =>
-                  handlePreferredLocationChange("country", e.target.value)
+                onChange={(val) =>
+                  handlePreferredLocationChange("country", val)
                 }
                 required
                 placeholder="Country"
-                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
               />
-              <input
-                aria-label="State or Province"
-                type="text"
+              <LocationInput
+                ariaLabel="State or Province"
                 value={formData.preferredLocation.stateOrProvince}
-                onChange={(e) =>
-                  handlePreferredLocationChange(
-                    "stateOrProvince",
-                    e.target.value,
-                  )
+                onChange={(val) =>
+                  handlePreferredLocationChange("stateOrProvince", val)
                 }
                 placeholder="State / Province (optional)"
-                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
               />
-              <input
-                aria-label="City"
-                type="text"
+              <LocationInput
+                ariaLabel="City"
                 value={formData.preferredLocation.city}
-                onChange={(e) =>
-                  handlePreferredLocationChange("city", e.target.value)
-                }
+                onChange={(val) => handlePreferredLocationChange("city", val)}
                 placeholder="City (optional)"
-                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
               />
             </div>
           </div>
@@ -779,7 +785,9 @@ export default function TravelForm({
               className="block text-sm font-medium text-slate-700"
             >
               Attractions of Interest{" "}
-              <span className="text-slate-400 font-normal">(Optional)</span>
+              <span className="text-slate-400 font-normal">
+                (Optional, max 100 characters)
+              </span>
             </label>
             <input
               type="text"
@@ -787,6 +795,8 @@ export default function TravelForm({
               name="attractionInterests"
               value={formData.attractionInterests}
               onChange={handleChange}
+              pattern=".{0,100}"
+              title="Needs to be under 100 characters."
               placeholder="e.g., art museums, skyline viewpoints, historic district..."
               className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
             />
@@ -798,133 +808,25 @@ export default function TravelForm({
                 Food Preferences
               </label>
 
-              <div className="space-y-2">
-                <p className="text-xs text-slate-500">Food stops</p>
-                <div className="flex flex-wrap gap-2">
-                  {foodPlaceTypeOptions.map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      onClick={() =>
-                        handleFoodArrayToggle("foodPlaceTypes", option)
-                      }
-                      className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${
-                        formData.foodPreferences.foodPlaceTypes.includes(option)
-                          ? "bg-emerald-100 border-emerald-500 text-emerald-800"
-                          : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
-                      }`}
-                      aria-pressed={formData.foodPreferences.foodPlaceTypes.includes(
-                        option,
-                      )}
-                    >
-                      {option}
-                    </button>
-                  ))}
+              {FOOD_PREFERENCE_SECTIONS.map(({ key, label, options }) => (
+                <div key={key} className="space-y-2">
+                  <p className="text-xs text-slate-500">{label}</p>
+                  <ToggleGroup
+                    options={options}
+                    selected={formData.foodPreferences[key]}
+                    onToggle={(val) => handleFoodArrayToggle(key, val)}
+                  />
                 </div>
-              </div>
-
-              <div className="space-y-2">
-                <p className="text-xs text-slate-500">Dietary restrictions</p>
-                <div className="flex flex-wrap gap-2">
-                  {dietaryRestrictionOptions.map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      onClick={() =>
-                        handleFoodArrayToggle("dietaryRestrictions", option)
-                      }
-                      className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${
-                        formData.foodPreferences.dietaryRestrictions.includes(
-                          option,
-                        )
-                          ? "bg-emerald-100 border-emerald-500 text-emerald-800"
-                          : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
-                      }`}
-                      aria-pressed={formData.foodPreferences.dietaryRestrictions.includes(
-                        option,
-                      )}
-                    >
-                      {option}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <p className="text-xs text-slate-500">Cuisine interests</p>
-                <div className="flex flex-wrap gap-2">
-                  {cuisineInterestOptions.map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      onClick={() =>
-                        handleFoodArrayToggle("cuisineInterests", option)
-                      }
-                      className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${
-                        formData.foodPreferences.cuisineInterests.includes(
-                          option,
-                        )
-                          ? "bg-emerald-100 border-emerald-500 text-emerald-800"
-                          : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
-                      }`}
-                      aria-pressed={formData.foodPreferences.cuisineInterests.includes(
-                        option,
-                      )}
-                    >
-                      {option}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <p className="text-xs text-slate-500">Dining style</p>
-                <div className="flex flex-wrap gap-2">
-                  {diningStyleOptions.map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      onClick={() =>
-                        handleFoodArrayToggle("diningStyle", option)
-                      }
-                      className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${
-                        formData.foodPreferences.diningStyle.includes(option)
-                          ? "bg-emerald-100 border-emerald-500 text-emerald-800"
-                          : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
-                      }`}
-                      aria-pressed={formData.foodPreferences.diningStyle.includes(
-                        option,
-                      )}
-                    >
-                      {option}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              ))}
 
               <div className="space-y-2">
                 <p className="text-xs text-slate-500">Food importance</p>
-                <div className="flex flex-wrap gap-2">
-                  {foodPriorityOptions.map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      onClick={() => handleFoodPriorityChange(option)}
-                      className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${
-                        formData.foodPreferences.foodPriority === option
-                          ? "bg-emerald-100 border-emerald-500 text-emerald-800"
-                          : showFoodPriorityError
-                            ? "bg-white border-red-300 text-slate-700 hover:border-red-400"
-                            : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
-                      }`}
-                      aria-pressed={
-                        formData.foodPreferences.foodPriority === option
-                      }
-                    >
-                      {option}
-                    </button>
-                  ))}
-                </div>
+                <ToggleGroup
+                  options={foodPriorityOptions}
+                  selected={formData.foodPreferences.foodPriority}
+                  onToggle={(val) => handleFoodPriorityChange(val as any)}
+                  hasError={showFoodPriorityError}
+                />
                 {showFoodPriorityError ? (
                   <p className="text-xs text-red-600">
                     Choose how important food is for this trip.
@@ -946,25 +848,11 @@ export default function TravelForm({
                 Tell us what kinds of places you prefer staying in once you are
                 at the destination.
               </p>
-              <div className="flex flex-wrap gap-2">
-                {lodgingTypeOptions.map((option) => (
-                  <button
-                    key={option}
-                    type="button"
-                    onClick={() => handleLodgingTypeToggle(option)}
-                    className={`px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${
-                      formData.lodgingPreferences.lodgingTypes.includes(option)
-                        ? "bg-emerald-100 border-emerald-500 text-emerald-800"
-                        : "bg-white border-slate-300 text-slate-700 hover:border-emerald-500"
-                    }`}
-                    aria-pressed={formData.lodgingPreferences.lodgingTypes.includes(
-                      option,
-                    )}
-                  >
-                    {option}
-                  </button>
-                ))}
-              </div>
+              <ToggleGroup
+                options={lodgingTypeOptions}
+                selected={formData.lodgingPreferences.lodgingTypes}
+                onToggle={handleLodgingTypeToggle}
+              />
             </div>
           ) : null}
         </div>

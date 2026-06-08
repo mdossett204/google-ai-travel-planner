@@ -21,10 +21,10 @@ interface RedisClientLike {
     value: string,
     options?: {
       EX?: number;
+      NX?: boolean;
     },
   ): Promise<unknown>;
   incr(key: string): Promise<number | `${number}`>;
-  expire(key: string, seconds: number): Promise<number | `${number}`>;
 }
 
 type MemoryEntry = {
@@ -34,8 +34,7 @@ type MemoryEntry = {
 
 const redisUrl = process.env.REDIS_URL?.trim();
 const isLocalDevelopment = process.env.NODE_ENV !== "production";
-const hasPlaceholderRedisUrl =
-  !redisUrl || /^YOUR_[A-Z0-9_]+$/i.test(redisUrl);
+const hasPlaceholderRedisUrl = !redisUrl || /^YOUR_[A-Z0-9_]+$/i.test(redisUrl);
 const memoryStore = new Map<string, MemoryEntry>();
 let hasLoggedLocalFallback = false;
 
@@ -61,15 +60,15 @@ function logLocalFallback(reason: string) {
   );
 }
 
-function shouldUseLocalRedisFallback() {
-  return isLocalDevelopment;
-}
-
 const localRedisClient: RedisClientLike = {
   async get(key) {
     return pruneExpiredEntry(key)?.value ?? null;
   },
   async set(key, value, options) {
+    if (options?.NX && pruneExpiredEntry(key)) {
+      return null;
+    }
+
     memoryStore.set(key, {
       value,
       expiresAt: getMemoryExpiration(options?.EX),
@@ -85,15 +84,6 @@ const localRedisClient: RedisClientLike = {
     });
     return nextValue;
   },
-  async expire(key, seconds) {
-    const entry = pruneExpiredEntry(key);
-    if (!entry) return 0;
-    memoryStore.set(key, {
-      value: entry.value,
-      expiresAt: getMemoryExpiration(seconds),
-    });
-    return 1;
-  },
 };
 
 const redisClient =
@@ -101,7 +91,7 @@ const redisClient =
 
 if (redisClient) {
   redisClient.on("error", (err: unknown) => {
-    if (shouldUseLocalRedisFallback()) {
+    if (isLocalDevelopment) {
       console.warn("Redis error:", err);
       return;
     }
@@ -110,7 +100,7 @@ if (redisClient) {
 }
 
 export function assertRedisConfigured() {
-  if (shouldUseLocalRedisFallback() && hasPlaceholderRedisUrl) {
+  if (isLocalDevelopment && hasPlaceholderRedisUrl) {
     return;
   }
 
@@ -125,7 +115,7 @@ export async function getRedisClient(): Promise<RedisClientLike> {
   assertRedisConfigured();
 
   if (!redisClient) {
-    if (shouldUseLocalRedisFallback()) {
+    if (isLocalDevelopment) {
       logLocalFallback("REDIS_URL is missing or uses the placeholder value.");
       return localRedisClient;
     }
@@ -141,7 +131,7 @@ export async function getRedisClient(): Promise<RedisClientLike> {
     }
     return redisClient;
   } catch (err) {
-    if (shouldUseLocalRedisFallback()) {
+    if (isLocalDevelopment) {
       logLocalFallback("Redis is unavailable.");
       return localRedisClient;
     }
@@ -160,10 +150,14 @@ export async function runFixedWindowRateLimit(
   const currentWindow = Math.floor(Date.now() / (windowSec * 1000));
   const redisKey = `ratelimit:${key}:${currentWindow}`;
 
-  const requests = Number(await client.incr(redisKey));
-  if (requests === 1) {
-    await client.expire(redisKey, windowSec * 2);
+  const initialized = await client.set(redisKey, "1", {
+    EX: windowSec * 2,
+    NX: true,
+  });
+  if (initialized) {
+    return 1 <= limit;
   }
 
+  const requests = Number(await client.incr(redisKey));
   return requests <= limit;
 }
