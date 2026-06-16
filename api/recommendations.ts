@@ -26,7 +26,8 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
   if (!enforcePostMethod(req, res)) return;
 
   try {
-    assertProviderApiKeysConfigured([getProvider()]);
+    const provider = getProvider();
+    assertProviderApiKeysConfigured([provider]);
     assertRedisConfigured();
 
     const data = validateTravelFormData(await readJsonBody(req));
@@ -140,6 +141,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
           ? "You are an elite travel concierge. At this stage, your job is to recommend destination concepts, not verified bookings. Use general destination knowledge and avoid web search in this stage. Do not include hotels, restaurants, exact addresses, opening hours, or official websites. Food preferences should usually be treated as a downstream itinerary constraint unless food is a primary travel goal. Provide factual, realistic recommendations grounded in the user's budget and travel goals."
           : "You are an elite travel concierge. Return ONLY a valid JSON array with exactly 3 recommendation objects matching the requested schema. Do not include any explanation, markdown, or text outside the JSON array.";
       const text = await generateText({
+        provider,
         prompt,
         systemInstruction,
         useSearchTool: false,
@@ -161,9 +163,12 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
         parsed = validateRecommendationsResponse(JSON.parse(parsedText));
         break;
       } catch (err) {
-        console.warn(
-          `[recommendations] JSON parse failed on attempt ${attempt + 1}`,
-        );
+        if (process.env.NODE_ENV !== "production") {
+          console.warn(
+            `[recommendations] attempt ${attempt + 1} failed:`,
+            err,
+          );
+        }
       }
     }
 

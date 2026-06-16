@@ -22,6 +22,7 @@ import {
   handleApiError,
   sanitizePromptInput,
   sendJson,
+  enforcePostMethod,
   type ApiRequest,
   type ApiResponse,
 } from "../utils/apiHelpers.js";
@@ -80,7 +81,7 @@ function getPacingRules(activityLevel: string) {
 
 function getItineraryVerificationConfig(): {
   provider: LlmProvider;
-  model: string;
+  model?: string;
   geminiTools?: ReturnType<typeof getGeminiVerificationTools>;
   openaiTools?: ReturnType<typeof getOpenAIVerificationTools>;
   anthropicTools?: ReturnType<typeof getAnthropicVerificationTools>;
@@ -88,11 +89,12 @@ function getItineraryVerificationConfig(): {
   const rawProvider = (
     process.env.ITINERARY_VERIFICATION_PROVIDER || "gemini"
   ).toLowerCase();
+  const model = process.env.ITINERARY_VERIFICATION_MODEL || undefined;
 
   if (rawProvider === "gemini") {
     return {
       provider: "gemini",
-      model: process.env.ITINERARY_VERIFICATION_MODEL || "gemini-2.5-flash",
+      model,
       geminiTools: getGeminiVerificationTools(),
     };
   }
@@ -100,26 +102,20 @@ function getItineraryVerificationConfig(): {
   if (rawProvider === "anthropic") {
     return {
       provider: "anthropic",
-      model: process.env.ITINERARY_VERIFICATION_MODEL || "claude-haiku-4-5",
+      model,
       anthropicTools: getAnthropicVerificationTools(),
     };
   }
 
   return {
     provider: "openai",
-    model: process.env.ITINERARY_VERIFICATION_MODEL || "gpt-5-mini",
+    model,
     openaiTools: getOpenAIVerificationTools(),
   };
 }
 
 export default async function handler(req: ApiRequest, res: ApiResponse) {
-  if (req.method === "OPTIONS") {
-    res.statusCode = 204;
-    return res.end();
-  }
-  if (req.method !== "POST") {
-    return sendJson(res, 405, { error: "Method not allowed" });
-  }
+  if (!enforcePostMethod(req, res)) return;
 
   try {
     const draftProvider = getProvider();
@@ -337,7 +333,9 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     const verifyPrompt = `
     You are the 'Verification & Formatting Concierge Agent'.
     Here is the combined trip-planning draft:
+    <draft_plan>
     ${draftPlan}
+    </draft_plan>
 
 	    Your task is to FACT-CHECK, VERIFY GEOGRAPHY, REMOVE WEAK ITEMS, and FORMAT the final itinerary.
 

@@ -1,4 +1,4 @@
-import { sanitizePromptInput } from "./apiHelpers.js";
+import { formatList } from "./apiHelpers.js";
 
 interface LodgingPreferencesInput {
   lodgingTypes?: string[];
@@ -7,10 +7,7 @@ interface LodgingPreferencesInput {
 export function formatLodgingPreferences(
   input: LodgingPreferencesInput,
 ): string {
-  const lodgingTypes =
-    input?.lodgingTypes && input.lodgingTypes.length > 0
-      ? sanitizePromptInput(input.lodgingTypes.join(", "))
-      : "No strong preference";
+  const lodgingTypes = formatList(input?.lodgingTypes, "No strong preference");
 
   return `- Lodging Types: ${lodgingTypes}`;
 }

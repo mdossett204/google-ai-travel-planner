@@ -81,7 +81,7 @@ function buildInitialFormData(
   };
 }
 
-const goalOptions = [
+const GOAL_OPTIONS = [
   "Relaxation",
   "Adventure",
   "Hiking",
@@ -89,20 +89,26 @@ const goalOptions = [
   "Nature & Wildlife",
   "Food & Culinary",
   "Party & Nightlife",
-];
-const activityLevelOptions: Array<"Relaxed" | "Balanced" | "Very Active"> = [
+] as const;
+type GoalOption = typeof GOAL_OPTIONS[number];
+
+const ACTIVITY_LEVEL_OPTIONS = [
   "Relaxed",
   "Balanced",
   "Very Active",
-];
-const transportOptions = [
+] as const;
+type ActivityLevel = typeof ACTIVITY_LEVEL_OPTIONS[number];
+
+const TRANSPORT_OPTIONS = [
   "Public Transit",
   "Rental Car",
   "Walking/Biking",
   "Taxis/Rideshare",
   "Own Car",
-];
-const monthOptions = [
+] as const;
+type TransportOption = typeof TRANSPORT_OPTIONS[number];
+
+const MONTH_OPTIONS = [
   "Jan",
   "Feb",
   "Mar",
@@ -115,8 +121,10 @@ const monthOptions = [
   "Oct",
   "Nov",
   "Dec",
-];
-const dietaryRestrictionOptions = [
+] as const;
+type Month = typeof MONTH_OPTIONS[number];
+
+const DIETARY_RESTRICTION_OPTIONS = [
   "Vegan",
   "Vegetarian",
   "Gluten-Free",
@@ -127,38 +135,51 @@ const dietaryRestrictionOptions = [
   "Paleo",
   "Carnivore",
   "No Restrictions",
-];
-const cuisineInterestOptions = [
+] as const;
+type DietaryRestriction = typeof DIETARY_RESTRICTION_OPTIONS[number];
+
+const CUISINE_INTEREST_OPTIONS = [
   "Seafood",
   "Regional Specialties",
   "Ethnic",
   "Street Food",
   "Cafe/Bakery",
   "No Preference",
-];
-const diningStyleOptions = [
+] as const;
+type CuisineInterest = typeof CUISINE_INTEREST_OPTIONS[number];
+
+const DINING_STYLE_OPTIONS = [
   "Casual",
   "Quick Meals",
   "Family-Friendly",
   "Scenic Dining",
   "Fine Dining",
-];
-const foodPlaceTypeOptions = [
+] as const;
+type DiningStyle = typeof DINING_STYLE_OPTIONS[number];
+
+const FOOD_PLACE_TYPE_OPTIONS = [
   "Restaurants",
   "Cafes/Bakeries",
   "Grocery Stores",
-];
-const foodPriorityOptions: Array<
-  "Not Important" | "Nice to Have" | "Major Trip Focus"
-> = ["Not Important", "Nice to Have", "Major Trip Focus"];
-const lodgingTypeOptions = [
+] as const;
+type FoodPlaceType = typeof FOOD_PLACE_TYPE_OPTIONS[number];
+
+const FOOD_PRIORITY_OPTIONS = [
+  "Not Important",
+  "Nice to Have",
+  "Major Trip Focus",
+] as const;
+type FoodPriority = typeof FOOD_PRIORITY_OPTIONS[number];
+
+const LODGING_TYPE_OPTIONS = [
   "Hotel",
   "Boutique Hotel",
   "Vacation Rental",
   "Bed & Breakfast",
   "Resort",
   "Hostel",
-];
+] as const;
+type LodgingType = typeof LODGING_TYPE_OPTIONS[number];
 
 const exclusiveOptionByField = {
   dietaryRestrictions: "No Restrictions",
@@ -171,30 +192,30 @@ const FOOD_PREFERENCE_SECTIONS = [
   {
     key: "foodPlaceTypes",
     label: "Food stops",
-    options: foodPlaceTypeOptions,
+    options: FOOD_PLACE_TYPE_OPTIONS,
   },
   {
     key: "dietaryRestrictions",
     label: "Dietary restrictions",
-    options: dietaryRestrictionOptions,
+    options: DIETARY_RESTRICTION_OPTIONS,
   },
   {
     key: "cuisineInterests",
     label: "Cuisine interests",
-    options: cuisineInterestOptions,
+    options: CUISINE_INTEREST_OPTIONS,
   },
-  { key: "diningStyle", label: "Dining style", options: diningStyleOptions },
+  { key: "diningStyle", label: "Dining style", options: DINING_STYLE_OPTIONS },
 ] as const;
 
-function ToggleGroup({
+function ToggleGroup<T extends string>({
   options,
   selected,
   onToggle,
   hasError,
 }: {
-  options: readonly string[] | string[];
-  selected: string | string[];
-  onToggle: (val: string) => void;
+  options: readonly T[];
+  selected: T | T[] | "";
+  onToggle: (val: T) => void;
   hasError?: boolean;
 }) {
   const isArray = Array.isArray(selected);
@@ -416,9 +437,7 @@ export default function TravelForm({
     });
   };
 
-  const handleFoodPriorityChange = (
-    value: "Not Important" | "Nice to Have" | "Major Trip Focus",
-  ) => {
+  const handleFoodPriorityChange = (value: FoodPriority) => {
     setFormData((prev) => ({
       ...prev,
       foodPreferences: {
@@ -491,7 +510,7 @@ export default function TravelForm({
               </span>
             </label>
             <ToggleGroup
-              options={monthOptions}
+              options={MONTH_OPTIONS}
               selected={formData.timeOfYear}
               onToggle={(val) => handleArrayToggle("timeOfYear", val)}
             />
@@ -691,7 +710,7 @@ export default function TravelForm({
               </span>
             </label>
             <ToggleGroup
-              options={goalOptions}
+              options={GOAL_OPTIONS}
               selected={formData.primaryGoal}
               onToggle={(val) => handleArrayToggle("primaryGoal", val)}
             />
@@ -706,7 +725,7 @@ export default function TravelForm({
               Helps set the pacing: packed days vs plenty of downtime.
             </p>
             <ToggleGroup
-              options={activityLevelOptions}
+              options={ACTIVITY_LEVEL_OPTIONS}
               selected={formData.activityLevel}
               onToggle={(val) =>
                 setFormData((prev) => ({
@@ -732,7 +751,7 @@ export default function TravelForm({
               destination.
             </p>
             <ToggleGroup
-              options={transportOptions}
+              options={TRANSPORT_OPTIONS}
               selected={formData.localTransportation}
               onToggle={(val) => handleArrayToggle("localTransportation", val)}
             />
@@ -822,9 +841,9 @@ export default function TravelForm({
               <div className="space-y-2">
                 <p className="text-xs text-slate-500">Food importance</p>
                 <ToggleGroup
-                  options={foodPriorityOptions}
+                  options={FOOD_PRIORITY_OPTIONS}
                   selected={formData.foodPreferences.foodPriority}
-                  onToggle={(val) => handleFoodPriorityChange(val as any)}
+                  onToggle={handleFoodPriorityChange}
                   hasError={showFoodPriorityError}
                 />
                 {showFoodPriorityError ? (
@@ -849,7 +868,7 @@ export default function TravelForm({
                 at the destination.
               </p>
               <ToggleGroup
-                options={lodgingTypeOptions}
+                options={LODGING_TYPE_OPTIONS}
                 selected={formData.lodgingPreferences.lodgingTypes}
                 onToggle={handleLodgingTypeToggle}
               />

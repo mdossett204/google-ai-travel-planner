@@ -33,9 +33,23 @@ export function formatTimeOfYear(
     : fallback;
 }
 
+export function formatList(
+  values: string[] | undefined,
+  fallback = "None specified",
+): string {
+  return values && values.length > 0
+    ? sanitizePromptInput(values.join(", "))
+    : fallback;
+}
+
 export function sanitizePromptInput(value: unknown, maxLength = 500): string {
   return String(value ?? "")
     .slice(0, maxLength)
+    // Strip invisible/control characters: bidi-overrides, zero-width chars, C0/C1 controls
+    .replace(
+      /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u200B-\u200D\u200E\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g,
+      "",
+    )
     .replace(/\r\n?|\n/g, " ")
     .replace(/[<>]/g, (char) => (char === "<" ? "&lt;" : "&gt;"))
     .replace(/[{}\[\]|]/g, " ") // Prevent structural prompt injection

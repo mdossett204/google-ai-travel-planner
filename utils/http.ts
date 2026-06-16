@@ -46,10 +46,15 @@ export async function readJsonBody(req: any) {
 
   if (req.body) {
     if (typeof req.body === "string") {
-      assertBodySizeWithinLimit(Buffer.byteLength(req.body, "utf8"));
+      assertBodySizeWithinLimit(new TextEncoder().encode(req.body).byteLength);
       return parseJsonSafely(req.body);
     }
 
+    // Body was pre-parsed by middleware (e.g. Vercel/Express). Estimate size
+    // via JSON.stringify to enforce the same 32 KB guard as the streaming path.
+    assertBodySizeWithinLimit(
+      new TextEncoder().encode(JSON.stringify(req.body)).byteLength,
+    );
     return req.body;
   }
 
@@ -57,8 +62,8 @@ export async function readJsonBody(req: any) {
   let body = "";
   for await (const chunk of req) {
     const chunkString =
-      typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
-    totalBytes += Buffer.byteLength(chunkString, "utf8");
+      typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
+    totalBytes += new TextEncoder().encode(chunkString).byteLength;
     assertBodySizeWithinLimit(totalBytes);
     body += chunkString;
   }
