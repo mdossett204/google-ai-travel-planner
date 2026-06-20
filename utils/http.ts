@@ -46,22 +46,33 @@ export async function readJsonBody(req: any) {
 
   if (req.body) {
     if (typeof req.body === "string") {
-      assertBodySizeWithinLimit(Buffer.byteLength(req.body, "utf8"));
+      assertBodySizeWithinLimit(new TextEncoder().encode(req.body).byteLength);
       return parseJsonSafely(req.body);
     }
 
+    // Body was pre-parsed by middleware (e.g. Vercel/Express). Estimate size
+    // via JSON.stringify to enforce the same 32 KB guard as the streaming path.
+    assertBodySizeWithinLimit(
+      new TextEncoder().encode(JSON.stringify(req.body)).byteLength,
+    );
     return req.body;
   }
 
   let totalBytes = 0;
   let body = "";
+  const decoder = new TextDecoder("utf-8");
   for await (const chunk of req) {
-    const chunkString =
-      typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
-    totalBytes += Buffer.byteLength(chunkString, "utf8");
-    assertBodySizeWithinLimit(totalBytes);
-    body += chunkString;
+    if (typeof chunk === "string") {
+      totalBytes += new TextEncoder().encode(chunk).byteLength;
+      assertBodySizeWithinLimit(totalBytes);
+      body += chunk;
+    } else {
+      totalBytes += chunk.byteLength;
+      assertBodySizeWithinLimit(totalBytes);
+      body += decoder.decode(chunk, { stream: true });
+    }
   }
+  body += decoder.decode();
 
   return parseJsonSafely(body);
 }

@@ -1,4 +1,4 @@
-import { sanitizePromptInput } from "./apiHelpers.js";
+import { sanitizePromptInput, formatList } from "./apiHelpers.js";
 
 interface FoodPreferencesInput {
   dietaryRestrictions?: string[];
@@ -6,12 +6,6 @@ interface FoodPreferencesInput {
   diningStyle?: string[];
   foodPlaceTypes?: string[];
   foodPriority?: string;
-}
-
-function formatList(values?: string[]) {
-  return values && values.length > 0
-    ? sanitizePromptInput(values.join(", "))
-    : "None specified";
 }
 
 export function formatFoodPreferences(input: FoodPreferencesInput): string {

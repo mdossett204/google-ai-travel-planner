@@ -81,18 +81,21 @@ function isDebugEnabled() {
   return process.env.DEBUG_LLM_ROUTER === "true";
 }
 
+function normalizeUnicode(s: string): string {
+  return s
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
 function buildCacheKey({
   query,
   limit,
   latitude,
   longitude,
 }: TomTomSearchOptions) {
-  const normalizedQuery = query
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
+  const normalizedQuery = normalizeUnicode(query).replace(/[^a-z0-9]+/g, " ");
 
   return JSON.stringify({
     query: normalizedQuery,
@@ -151,12 +154,7 @@ function normalizeSearchResult(rawResult: unknown): TomTomSearchResult {
 }
 
 function normalizeForMatch(s: string): string {
-  return s
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, "")
-    .trim();
+  return normalizeUnicode(s).replace(/[^a-z0-9\s]/g, "");
 }
 
 export function isTomTomResultMatch({
