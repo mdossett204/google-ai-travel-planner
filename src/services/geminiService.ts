@@ -109,18 +109,19 @@ export async function getRecommendations(
   }
 
   for (const rec of payload) {
+    const item = rec as Record<string, any>;
     if (
-      !rec ||
-      typeof rec !== "object" ||
-      typeof rec.id !== "string" ||
-      typeof rec.title !== "string" ||
-      typeof rec.description !== "string" ||
-      !Array.isArray(rec.highlights) ||
-      !rec.highlights.every(
+      !item ||
+      typeof item !== "object" ||
+      typeof item.id !== "string" ||
+      typeof item.title !== "string" ||
+      typeof item.description !== "string" ||
+      !Array.isArray(item.highlights) ||
+      !item.highlights.every(
         (highlight: unknown) => typeof highlight === "string",
       ) ||
-      typeof rec.estimatedCost !== "string" ||
-      typeof rec.bestTimeToGo !== "string"
+      typeof item.estimatedCost !== "string" ||
+      typeof item.bestTimeToGo !== "string"
     ) {
       throw new Error(
         "Invalid response format: missing or invalid recommendation fields.",

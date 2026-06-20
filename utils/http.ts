@@ -60,13 +60,19 @@ export async function readJsonBody(req: any) {
 
   let totalBytes = 0;
   let body = "";
+  const decoder = new TextDecoder("utf-8");
   for await (const chunk of req) {
-    const chunkString =
-      typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
-    totalBytes += new TextEncoder().encode(chunkString).byteLength;
-    assertBodySizeWithinLimit(totalBytes);
-    body += chunkString;
+    if (typeof chunk === "string") {
+      totalBytes += new TextEncoder().encode(chunk).byteLength;
+      assertBodySizeWithinLimit(totalBytes);
+      body += chunk;
+    } else {
+      totalBytes += chunk.byteLength;
+      assertBodySizeWithinLimit(totalBytes);
+      body += decoder.decode(chunk, { stream: true });
+    }
   }
+  body += decoder.decode();
 
   return parseJsonSafely(body);
 }
