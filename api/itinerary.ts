@@ -167,9 +167,12 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     const draftPacingRules = pacingRules.draft.join("\n    ");
     const verifyPacingRules = pacingRules.verify.join("\n    ");
 
-    const shouldVerifyFoodPlaces =
+    const isFoodMajorTripFocus =
       data.includeFood &&
-      data.foodPreferences.foodPriority === "Major Trip Focus";
+      (data.foodPreferences.foodPriority === "Major Trip Focus" ||
+        data.primaryGoal?.includes("Food & Culinary"));
+
+    const shouldVerifyFoodPlaces = isFoodMajorTripFocus;
     const shouldVerifyLodgingPlaces = data.includeLodging;
 
     const verificationScopeRules = [
@@ -269,7 +272,9 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
             "- Restaurant/cafe/grocery choices must be geographically close to the same day's activities or the stay area for that night.",
             "- Respect dietary restrictions precisely as hard constraints.",
             "- Treat cuisine interests and dining style as soft preferences that should guide the tone of the recommendations.",
-            '- Let food priority control how strongly food shapes the plan: if food priority is "Major Trip Focus", give food suggestions more weight; if it is "Nice to Have", balance food with geography; if it is "Not Important", prioritize geography and logistics first.',
+            isFoodMajorTripFocus
+              ? '- Food is a MAJOR TRIP FOCUS. Give food suggestions high weight and ensure they feel like a central, high-quality part of the daily flow.'
+              : '- Balance food with geography and logistics. Since food is not the major focus, prioritize geography and convenience first.',
           ].join("\n    ")
         : "\n    - Food is disabled: do NOT include food suggestions."
     }
