@@ -430,6 +430,8 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     - Do NOT output the raw planning notes.
     - Output ONLY the final unified Markdown itinerary.
     - Keep the writing concise, useful, and specific.
+    - NEVER output the string "N/A". If a detail (like pace, area, or price) is missing, simply omit it naturally.
+    - Do NOT carry over the raw pipe-separated format (e.g. \`| Area:\` or \`| Pace:\`) from the draft into the Day-by-Day Itinerary. Write the activities as flowing sentences.
     ${outputSectionsRule}
     </critical_formatting>
 

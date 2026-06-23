@@ -307,7 +307,7 @@ export async function generateTextWithMeta(
     const openai = (clients.openai ??= new OpenAI({
       apiKey: process.env.OPENAI_API_KEY,
     }));
-    resolvedModel = model || "gpt-5-mini";
+    resolvedModel = model || "gpt-5.4";
     const hasOpenAITools = (opts.openaiTools?.length || 0) > 0;
     const openaiTools = opts.openaiTools ?? [];
 
