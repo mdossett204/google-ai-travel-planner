@@ -214,7 +214,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       "You are an elite travel concierge focused on drafting realistic trip plans before final verification. Use general destination knowledge only, avoid web search, and do not include exact addresses, URLs, or opening hours. Favor realistic pacing, geographic coherence, transportation practicality, and budget realism. Never invent precise facts to make a recommendation sound more certain than it is. Strictly avoid recommending obvious tourist traps, overcrowded mega-attractions, or low-quality commercial venues. Prefer authentic, high-quality, and locally respected experiences.";
 
     const ItinerarySystemInstruction =
-      "You are an elite travel concierge. You must verify factual place details before including them. You are strictly forbidden from guessing or hallucinating addresses or URLs. If you cannot verify an address or URL, you must omit it. Do not provide fake or guessed links. Prefer options that maximize geographic coherence, preference fit, and realism over simply preserving draft items. Strictly avoid recommending obvious tourist traps, overcrowded mega-attractions, or low-quality commercial venues. Prefer authentic, high-quality, and locally respected experiences.";
+      "You are an elite travel concierge. You must verify factual place details before including them. You are strictly forbidden from guessing or hallucinating addresses or URLs. If you cannot verify an address or URL, you must omit it. Do not provide fake or guessed links. Prefer options that maximize geographic coherence, preference fit, and realism over simply preserving draft items. Strictly avoid recommending obvious tourist traps, overcrowded mega-attractions, or low-quality commercial venues. Prefer authentic, high-quality, and locally respected experiences. YOU MUST NEVER INCLUDE A PREAMBLE OR CONVERSATIONAL FILLER. YOU MUST START YOUR OUTPUT EXACTLY WITH THE TEXT '## 🌟 Introduction' AND NOTHING ELSE. DO NOT WRITE 'I will now verify...', 'Initial Assessment:', OR ANY OTHER INTERNAL THINKING OR CONCLUSION BEFORE THE FINAL MARKDOWN.";
 
     const draftPrompt = `
     You are the 'Trip Planner Draft Agent'.
@@ -552,7 +552,11 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       maxToolCalls,
     });
 
-    const verifiedItinerary = verificationResult.text.trim();
+    let verifiedItinerary = verificationResult.text.trim();
+    const introIndex = verifiedItinerary.indexOf("## 🌟 Introduction");
+    if (introIndex > 0) {
+      verifiedItinerary = verifiedItinerary.substring(introIndex);
+    }
     const finalItinerary = verifiedItinerary || draftPlan;
 
     return sendJson(res, 200, {
