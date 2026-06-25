@@ -89,6 +89,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     - Each option should feel plausible for the stated duration and budget.
     - Each option should match the traveler type, goals, and transport preferences.
     - Highlight specific experiences, neighborhoods, landmark-level attractions, or activity clusters, not vague tourism phrases.
+    - Strictly avoid recommending obvious tourist traps, overcrowded mega-attractions, or low-quality commercial venues. Prefer authentic, high-quality, and locally respected experiences.
     - Keep each highlight concise, ideally a short phrase rather than a full sentence.
     - Do NOT include hotels, restaurants, exact addresses, opening hours, or URLs in this stage.
     - The title should clearly reflect the actual destination.
@@ -96,8 +97,8 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     </quality_bar>
 
     <output_rules>
-    You MUST return valid JSON only. Do not include markdown, commentary, or code fences.
-    Return a JSON array of exactly 3 objects.
+    You MUST return valid JSON exactly matching the provided schema.
+    Provide exactly 3 recommendation objects.
     Each object must have exactly these keys:
     - "id": unique lowercase kebab-case identifier based on destination and trip style (must be under 100 characters)
     - "title": destination plus a concise trip style title (must be under 100 characters)
@@ -107,32 +108,34 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     - "bestTimeToGo": recommended months or season, grounded in the user's timing if possible (must be under 100 characters)
 
     JSON OUTPUT EXAMPLE
-    [
     {
-    "id": "asheville-walkable-arts-and-cafes",
-    "title": "Asheville Walkable Arts and Cafes",
-    "description": "This option fits travelers who want a compact city base with galleries, local character, and an easy pace. It works well when food and neighborhood atmosphere matter, but logistics still need to stay simple.",
-    "highlights": ["downtown asheville", "river arts district", "local cafes", "street murals"],
-    "estimatedCost": "$1,100 - $1,600",
-    "bestTimeToGo": "April to June (spring to early summer)"
-    },
-    {
-    "id": "asheville-blue-ridge-scenic-base",
-    "title": "Asheville Blue Ridge Scenic Base",
-    "description": "This option leans more scenic, with parkway viewpoints, mountain atmosphere, and a balanced mix of town and nature. It is still grounded in one practical base area rather than spreading the trip too widely.",
-    "highlights": ["blue ridge parkway access", "sunset viewpoints", "downtown base", "easy nature stops"],
-    "estimatedCost": "$1,200 - $1,700",
-    "bestTimeToGo": "May to October (late spring to fall)"
-    },
-    {
-    "id": "asheville-outdoors-forward-weekend",
-    "title": "Asheville Outdoors-Forward Weekend",
-    "description": "This option is more active, with stronger emphasis on trails, overlooks, and time outdoors while still returning to a convenient Asheville base. It suits travelers who want more movement without turning the trip into a long-distance driving loop.",
-    "highlights": ["mountain trails", "parkway overlooks", "north carolina arboretum", "brewery district"],
-    "estimatedCost": "$1,150 - $1,750",
-    "bestTimeToGo": "April to October (spring through fall)"
+      "recommendations": [
+        {
+          "id": "asheville-walkable-arts-and-cafes",
+          "title": "Asheville Walkable Arts and Cafes",
+          "description": "This option fits travelers who want a compact city base with galleries, local character, and an easy pace. It works well when food and neighborhood atmosphere matter, but logistics still need to stay simple.",
+          "highlights": ["downtown asheville", "river arts district", "local cafes", "street murals"],
+          "estimatedCost": "$1,100 - $1,600",
+          "bestTimeToGo": "April to June (spring to early summer)"
+        },
+        {
+          "id": "asheville-blue-ridge-scenic-base",
+          "title": "Asheville Blue Ridge Scenic Base",
+          "description": "This option leans more scenic, with parkway viewpoints, mountain atmosphere, and a balanced mix of town and nature. It is still grounded in one practical base area rather than spreading the trip too widely.",
+          "highlights": ["blue ridge parkway access", "sunset viewpoints", "downtown base", "easy nature stops"],
+          "estimatedCost": "$1,200 - $1,700",
+          "bestTimeToGo": "May to October (late spring to fall)"
+        },
+        {
+          "id": "asheville-outdoors-forward-weekend",
+          "title": "Asheville Outdoors-Forward Weekend",
+          "description": "This option is more active, with stronger emphasis on trails, overlooks, and time outdoors while still returning to a convenient Asheville base. It suits travelers who want more movement without turning the trip into a long-distance driving loop.",
+          "highlights": ["mountain trails", "parkway overlooks", "north carolina arboretum", "brewery district"],
+          "estimatedCost": "$1,150 - $1,750",
+          "bestTimeToGo": "April to October (spring through fall)"
+        }
+      ]
     }
-    ]
     </output_rules>
 
     <final_check>
@@ -144,33 +147,54 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     </final_check>
   `;
 
+    const responseSchema = {
+      type: "object",
+      properties: {
+        recommendations: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+              title: { type: "string" },
+              description: { type: "string" },
+              highlights: { type: "array", items: { type: "string" } },
+              estimatedCost: { type: "string" },
+              bestTimeToGo: { type: "string" },
+            },
+            required: [
+              "id",
+              "title",
+              "description",
+              "highlights",
+              "estimatedCost",
+              "bestTimeToGo",
+            ],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["recommendations"],
+      additionalProperties: false,
+    };
+
     let parsed = null;
     for (let attempt = 0; attempt < 2; attempt++) {
       const systemInstruction =
         attempt === 0
-          ? "You are an elite travel concierge. At this stage, your job is to recommend destination concepts, not verified bookings. Use general destination knowledge and avoid web search in this stage. Do not include hotels, restaurants, exact addresses, opening hours, or official websites. Food preferences should usually be treated as a downstream itinerary constraint unless food is a primary travel goal. Provide factual, realistic recommendations grounded in the user's budget and travel goals."
-          : "You are an elite travel concierge. Return ONLY a valid JSON array with exactly 3 recommendation objects matching the requested schema. Do not include any explanation, markdown, or text outside the JSON array.";
+          ? "You are an elite travel concierge. At this stage, your job is to recommend destination concepts, not verified bookings. Use general destination knowledge and avoid web search in this stage. Do not include hotels, restaurants, exact addresses, opening hours, or official websites. Food preferences should usually be treated as a downstream itinerary constraint unless food is a primary travel goal. Provide factual, realistic recommendations grounded in the user's budget and travel goals. Strictly avoid recommending obvious tourist traps, overcrowded mega-attractions, or low-quality commercial venues. Prefer authentic, high-quality, and locally respected experiences."
+          : "You are an elite travel concierge. Return ONLY a valid JSON object matching the requested schema. Do not include any explanation, markdown, or text outside the JSON.";
       const text = await generateText({
         provider,
         prompt,
         systemInstruction,
         useSearchTool: false,
+        responseSchema,
       });
 
-      let parsedText = text || "[]";
-      const firstBracket = parsedText.indexOf("[");
-      const lastBracket = parsedText.lastIndexOf("]");
-
-      if (
-        firstBracket !== -1 &&
-        lastBracket !== -1 &&
-        lastBracket > firstBracket
-      ) {
-        parsedText = parsedText.substring(firstBracket, lastBracket + 1);
-      }
-
       try {
-        parsed = validateRecommendationsResponse(JSON.parse(parsedText));
+        const parsedJson = JSON.parse(text);
+        parsed = validateRecommendationsResponse(parsedJson.recommendations);
         break;
       } catch (err) {
         if (process.env.NODE_ENV !== "production") {
