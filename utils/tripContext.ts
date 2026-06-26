@@ -22,7 +22,7 @@ export function formatTravelerType(travelerType?: string): string {
     case "Solo":
       return "Solo traveler: independent, flexible pacing, comfortable with self-directed exploration.";
     case "Couple":
-      return "Couple: shared experiences, scenic atmosphere, smooth transitions, and lower-friction pacing.";
+      return "Couple: travel for two, focusing on shared interests and seamless daily logistics.";
     case "Family":
       return "Family: simpler logistics, broader appeal, easier transitions, and lower-friction daily planning.";
     case "Friends":

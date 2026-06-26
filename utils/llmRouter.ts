@@ -242,6 +242,8 @@ type GenerateTextOptions = {
   openaiTools?: OpenAI.Chat.ChatCompletionTool[];
   anthropicTools?: Anthropic.Tool[];
   maxToolCalls?: number;
+  responseSchema?: Record<string, unknown>;
+  responseSchemaName?: string;
 };
 
 export async function generateText(opts: GenerateTextOptions): Promise<string> {
@@ -307,7 +309,7 @@ export async function generateTextWithMeta(
     const openai = (clients.openai ??= new OpenAI({
       apiKey: process.env.OPENAI_API_KEY,
     }));
-    resolvedModel = model || "gpt-5-mini";
+    resolvedModel = model || "gpt-5.4";
     const hasOpenAITools = (opts.openaiTools?.length || 0) > 0;
     const openaiTools = opts.openaiTools ?? [];
 
@@ -316,6 +318,17 @@ export async function generateTextWithMeta(
       messages.push({ role: "system", content: opts.systemInstruction });
     }
     messages.push({ role: "user", content: opts.prompt });
+
+    const openAiResponseFormat = opts.responseSchema
+      ? {
+          type: "json_schema" as const,
+          json_schema: {
+            name: opts.responseSchemaName || "json_schema",
+            strict: true,
+            schema: opts.responseSchema,
+          },
+        }
+      : undefined;
 
     if (!hasOpenAITools) {
       const response = await withLlmRetry({
@@ -327,6 +340,7 @@ export async function generateTextWithMeta(
           return openai.chat.completions.create({
             model: resolvedModel,
             messages,
+            ...(openAiResponseFormat ? { response_format: openAiResponseFormat } : {}),
           });
         },
       });
@@ -345,6 +359,7 @@ export async function generateTextWithMeta(
               model: resolvedModel,
               tools: openaiTools,
               messages,
+              ...(openAiResponseFormat ? { response_format: openAiResponseFormat } : {}),
             });
           },
         });
@@ -397,6 +412,7 @@ export async function generateTextWithMeta(
               openai.chat.completions.create({
                 model: resolvedModel,
                 messages: finalMessages,
+                ...(openAiResponseFormat ? { response_format: openAiResponseFormat } : {}),
               }),
             (res) => res.choices[0]?.message?.content || "",
           );
@@ -464,6 +480,7 @@ export async function generateTextWithMeta(
             openai.chat.completions.create({
               model: resolvedModel,
               messages: finalMessages,
+              ...(openAiResponseFormat ? { response_format: openAiResponseFormat } : {}),
             }),
           (res) => res.choices[0]?.message?.content || "",
         );
@@ -477,6 +494,18 @@ export async function generateTextWithMeta(
     const hasAnthropicTools = (opts.anthropicTools?.length || 0) > 0;
     const anthropicTools = opts.anthropicTools ?? [];
 
+    const anthropicOutputConfig = opts.responseSchema ? {
+      format: {
+        type: "json_schema" as const,
+        schema: {
+          type: "object",
+          properties: opts.responseSchema.properties,
+          required: opts.responseSchema.required,
+          additionalProperties: opts.responseSchema.additionalProperties ?? false,
+        }
+      }
+    } : undefined;
+
     if (!hasAnthropicTools) {
       const msg = await withLlmRetry({
         provider,
@@ -489,9 +518,11 @@ export async function generateTextWithMeta(
             max_tokens: ANTHROPIC_MAX_TOKENS,
             system: opts.systemInstruction,
             messages: [{ role: "user", content: opts.prompt }],
+            ...(anthropicOutputConfig ? { output_config: anthropicOutputConfig as any } : {})
           });
         },
       });
+      
       text = normalizeText(msg);
     } else {
       let messages: Anthropic.MessageParam[] = [
@@ -512,6 +543,7 @@ export async function generateTextWithMeta(
               system: opts.systemInstruction,
               tools: anthropicTools,
               messages,
+              ...(anthropicOutputConfig ? { output_config: anthropicOutputConfig as any } : {})
             });
           },
         });
@@ -557,6 +589,7 @@ export async function generateTextWithMeta(
                 max_tokens: ANTHROPIC_MAX_TOKENS,
                 system: opts.systemInstruction,
                 messages: finalMessages,
+                ...(anthropicOutputConfig ? { output_config: anthropicOutputConfig as any } : {})
               }),
             (res) => res,
           );
@@ -642,6 +675,7 @@ export async function generateTextWithMeta(
               max_tokens: ANTHROPIC_MAX_TOKENS,
               system: opts.systemInstruction,
               messages: finalMessages,
+              ...(anthropicOutputConfig ? { output_config: anthropicOutputConfig as any } : {})
             }),
           (res) => res,
         );
@@ -664,6 +698,14 @@ export async function generateTextWithMeta(
       });
     }
 
+    const geminiConfig: any = {
+      systemInstruction: opts.systemInstruction,
+    };
+    if (opts.responseSchema) {
+      geminiConfig.responseMimeType = "application/json";
+      geminiConfig.responseSchema = opts.responseSchema;
+    }
+
     if (tools.length === 0) {
       const response = await withLlmRetry({
         provider,
@@ -674,9 +716,7 @@ export async function generateTextWithMeta(
           return gemini.models.generateContent({
             model: resolvedModel,
             contents: opts.prompt,
-            config: {
-              systemInstruction: opts.systemInstruction,
-            },
+            config: geminiConfig,
           });
         },
       });
@@ -696,8 +736,8 @@ export async function generateTextWithMeta(
               model: resolvedModel,
               contents,
               config: {
+                ...geminiConfig,
                 tools,
-                systemInstruction: opts.systemInstruction,
               },
             });
           },
@@ -745,7 +785,7 @@ export async function generateTextWithMeta(
               gemini.models.generateContent({
                 model: resolvedModel,
                 contents: finalContents,
-                config: { systemInstruction: opts.systemInstruction },
+                config: geminiConfig,
               }),
             (res) => res.text || "",
           );
