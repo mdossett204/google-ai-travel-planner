@@ -15,7 +15,6 @@ import {
 } from "../utils/tripContext.js";
 import {
   handleApiError,
-  sanitizePromptInput,
   sendJson,
   enforcePostMethod,
   type ApiRequest,
@@ -31,7 +30,6 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     assertRedisConfigured();
 
     const data = validateTravelFormData(await readJsonBody(req));
-    const durationValue = data.durationValue;
     const locationRules = buildLocationRules(data.preferredLocation);
 
     const prompt = `
@@ -97,46 +95,10 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     </quality_bar>
 
     <output_rules>
-    You MUST return valid JSON exactly matching the provided schema.
     Provide exactly 3 recommendation objects.
-    Each object must have exactly these keys:
-    - "id": unique lowercase kebab-case identifier based on destination and trip style (must be under 100 characters)
-    - "title": destination plus a concise trip style title (must be under 100 characters)
-    - "description": 2-4 sentences explaining why this trip is a strong match (must be under 1000 characters)
-    - "highlights": array of exactly 3 specific highlights, neighborhoods, or activities (each under 100 characters)
-    - "estimatedCost": numerical USD range such as "$1,800 - $2,400" (must be under 100 characters)
-    - "bestTimeToGo": recommended months or season, grounded in the user's timing if possible (must be under 100 characters)
-
-    JSON OUTPUT EXAMPLE
-    {
-      "recommendations": [
-        {
-          "id": "asheville-walkable-arts-and-cafes",
-          "title": "Asheville Walkable Arts and Cafes",
-          "description": "This option fits travelers who want a compact city base with galleries, local character, and an easy pace. It works well when food and neighborhood atmosphere matter, but logistics still need to stay simple.",
-          "highlights": ["downtown asheville", "river arts district", "local cafes", "street murals"],
-          "estimatedCost": "$1,100 - $1,600",
-          "bestTimeToGo": "April to June (spring to early summer)"
-        },
-        {
-          "id": "asheville-blue-ridge-scenic-base",
-          "title": "Asheville Blue Ridge Scenic Base",
-          "description": "This option leans more scenic, with parkway viewpoints, mountain atmosphere, and a balanced mix of town and nature. It is still grounded in one practical base area rather than spreading the trip too widely.",
-          "highlights": ["blue ridge parkway access", "sunset viewpoints", "downtown base", "easy nature stops"],
-          "estimatedCost": "$1,200 - $1,700",
-          "bestTimeToGo": "May to October (late spring to fall)"
-        },
-        {
-          "id": "asheville-outdoors-forward-weekend",
-          "title": "Asheville Outdoors-Forward Weekend",
-          "description": "This option is more active, with stronger emphasis on trails, overlooks, and time outdoors while still returning to a convenient Asheville base. It suits travelers who want more movement without turning the trip into a long-distance driving loop.",
-          "highlights": ["mountain trails", "parkway overlooks", "north carolina arboretum", "brewery district"],
-          "estimatedCost": "$1,150 - $1,750",
-          "bestTimeToGo": "April to October (spring through fall)"
-        }
-      ]
-    }
+    You MUST return valid JSON exactly matching the provided schema.
     </output_rules>
+
 
     <final_check>
     - Confirm all 3 recommendations remain inside the requested location if one was provided.
@@ -155,12 +117,37 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
           items: {
             type: "object",
             properties: {
-              id: { type: "string" },
-              title: { type: "string" },
-              description: { type: "string" },
-              highlights: { type: "array", items: { type: "string" } },
-              estimatedCost: { type: "string" },
-              bestTimeToGo: { type: "string" },
+              id: {
+                type: "string",
+                description:
+                  "unique lowercase kebab-case identifier based on destination and trip style (must be under 100 characters)",
+              },
+              title: {
+                type: "string",
+                description:
+                  "destination plus a concise trip style title (must be under 100 characters)",
+              },
+              description: {
+                type: "string",
+                description:
+                  "2-4 sentences explaining why this trip is a strong match (must be under 1000 characters)",
+              },
+              highlights: {
+                type: "array",
+                items: { type: "string" },
+                description:
+                  "array of exactly 3 specific highlights, neighborhoods, or activities (each under 100 characters)",
+              },
+              estimatedCost: {
+                type: "string",
+                description:
+                  "numerical USD range such as '$1,800 - $2,400' (must be under 100 characters)",
+              },
+              bestTimeToGo: {
+                type: "string",
+                description:
+                  "recommended months or season, grounded in the user's timing if possible (must be under 100 characters)",
+              },
             },
             required: [
               "id",

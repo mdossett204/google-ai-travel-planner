@@ -311,7 +311,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     - Priority 3: Activity Level & Pacing. Drop lower-priority activities if keeping them would make the day too rushed.
     </conflict_resolution>
 
-    OUTPUT FORMAT:
+    <output_format>
     Return plain text only in this exact structure:
 
     ACTIVITY PLAN
@@ -332,6 +332,12 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     - Dinner: <name or "Skip recommendation"> | Cuisine: <type or "N/A"> | Price: <estimated price or "N/A"> | Near: <activity or area> | Diet fit: <≤8 words, explicitly referencing dietary constraint or flexibility> | Skip reason: <short reason, <=12 words, or "N/A"> | Confidence: <high/medium/low>
 
     Repeat the DAY N blocks as needed. Do not include markdown headings or any other prose.
+    </output_format>
+
+    <final_directive>
+    You are an automated data formatter. Do NOT output a single word of conversational preamble (like "Here is your plan:").
+    Your very first output token must be "ACTIVITY PLAN".
+    </final_directive>
   `;
 
     const draftPlan = await generateText({
@@ -398,12 +404,8 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     - If the search_place tool does not return a website, omit the website entirely.
     - Copy the website exactly as returned by the tool. Do not modify, shorten, or reformat it.
     - Never invent, infer, rewrite, or supplement a website from model memory or general search.
-    - For verified attractions/activities, you MAY include an official website only if it is returned directly by the search_place tool.
     - If a detail is uncertain, omit it instead of inventing it.
     - If tool results contradict the draft plans, trust the tool results and correct the itinerary.
-    - Clearly label verification status for named places you include:
-      - If you verified via tool, append "(Verified)".
-      - If you did NOT verify, append "(Not verified)" and do not include address/website.
     </anti_hallucination_rules>
 
     <input_interpretation>
@@ -428,7 +430,6 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     - Keep the writing concise, useful, and specific.
     - NEVER output the string "N/A". If a detail (like pace, area, or price) is missing, simply omit it naturally.
     - Do NOT carry over the raw pipe-separated format (e.g. \`| Area:\` or \`| Pace:\`) from the draft into the Day-by-Day Itinerary. Write the activities as flowing sentences.
-    - STRICTLY FORBIDDEN: Do not output any conversational filler, internal thinking, or preamble (e.g., "Perfect. All major arts anchors verified.", "Here is the final itinerary:"). Start your response exactly with "## 🌟 Introduction".
     ${outputSectionsRule}
     </critical_formatting>
 
@@ -439,6 +440,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     - Keep descriptions punchy. Do not write long, meandering paragraphs.
     </tone_guidelines>
 
+    <output_format>
     Return the final Markdown using this exact structure:
 
     ## 🌟 Introduction
@@ -493,8 +495,9 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     Write 4-6 bullets.
     Prioritize entry requirements, seasonal conditions, reservation needs, and packing essentials.
     Keep each bullet under 20 words.
+    </output_format>
 
-    EXAMPLE OUTPUT
+    <example_output>
     ## 🌟 Introduction
     This trip keeps daily movement compact around central Asheville. It balances a practical downtown base with easy access to scenic mountain stops.
 
@@ -538,6 +541,14 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     - Bring a light layer for cooler parkway evenings.
     - Check seasonal parkway closures before heading to overlooks.
     - Book timed-entry attractions early during peak periods.
+    </example_output>
+
+    <final_directive>
+    You are an automated markdown generator.
+    1. Your very first output token MUST be "#". Do NOT output a single word of conversational preamble.
+    2. You MUST use exactly the section headers specified in <output_format>.
+    3. Do NOT output any concluding remarks or conversational sign-offs after the Tips and Tricks section.
+    </final_directive>
   `;
 
     const verificationResult = await generateTextWithMeta({
@@ -553,9 +564,10 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     });
 
     let verifiedItinerary = verificationResult.text.trim();
-    const introIndex = verifiedItinerary.indexOf("## 🌟 Introduction");
-    if (introIndex > 0) {
-      verifiedItinerary = verifiedItinerary.substring(introIndex);
+    // Reliably strip conversational preamble by finding the very first markdown heading
+    const firstHeadingMatch = verifiedItinerary.match(/^#+\s/m);
+    if (firstHeadingMatch && firstHeadingMatch.index !== undefined && firstHeadingMatch.index > 0) {
+      verifiedItinerary = verifiedItinerary.substring(firstHeadingMatch.index);
     }
     const finalItinerary = verifiedItinerary || draftPlan;
 
