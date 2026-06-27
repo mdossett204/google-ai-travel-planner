@@ -6,6 +6,7 @@ export interface TomTomSearchOptions {
   limit?: number;
   latitude?: number;
   longitude?: number;
+  countryCode?: string;
 }
 
 export interface TomTomSearchResult {
@@ -94,6 +95,7 @@ function buildCacheKey({
   limit,
   latitude,
   longitude,
+  countryCode,
 }: TomTomSearchOptions) {
   const normalizedQuery = normalizeUnicode(query).replace(/[^a-z0-9]+/g, " ");
 
@@ -102,6 +104,7 @@ function buildCacheKey({
     limit: limit ?? 1,
     lat: typeof latitude === "number" ? Number(latitude.toFixed(2)) : null,
     lon: typeof longitude === "number" ? Number(longitude.toFixed(2)) : null,
+    countryCode: countryCode || null,
   });
 }
 
@@ -176,11 +179,15 @@ export function isTomTomResultMatch({
 
   if (placeTokens.length === 0 || resultTokens.length === 0) return false;
 
-  // 1. Strict Name Match: Token overlap must be strictly > 50%
+  // 1. Name Match
   const intersection = placeTokens.filter((t) => resultTokens.includes(t));
   const overlapRatio = intersection.length / placeTokens.length;
 
-  let isNameMatch = overlapRatio > 0.5;
+  // Overlap must be strictly > 50%, UNLESS the result is exactly 1 word, then 50% is allowed.
+  // This allows "Hakata Station" (2 words) to match "Hakata" (1 word), but prevents 
+  // "Fukuoka Tower" (2 words) from matching "Fukuoka Hospital" (2 words).
+  let isNameMatch =
+    overlapRatio > 0.5 || (overlapRatio === 0.5 && resultTokens.length === 1);
 
   // Substring fallback for single-word queries matching multi-word results
   // e.g. "Louvre" matches "The Louvre Museum"
@@ -205,7 +212,9 @@ export function isTomTomResultMatch({
         [result.city, result.region, result.country, result.address].join(" "),
       );
 
-      // The result must contain at least one significant word from the location hint
+      // We use some() so that if the LLM provides a neighborhood (e.g. "Pilsen, Chicago"),
+      // it passes as long as "Chicago" is in the official address string. 
+      // Country bounding is already safely handled via the TomTom API countrySet parameter.
       const hasGeoMatch = hintTokens.some((t) => geoString.includes(t));
       if (!hasGeoMatch) return false;
     }
@@ -221,6 +230,8 @@ export async function executeSearchPlace(
   const placeName = typeof args.name === "string" ? args.name.trim() : "";
   const locationHint =
     typeof args.locationHint === "string" ? args.locationHint.trim() : "";
+  const countryCode =
+    typeof args.countryCode === "string" ? args.countryCode.trim() : undefined;
 
   if (!placeName) {
     return {
@@ -230,15 +241,26 @@ export async function executeSearchPlace(
   }
 
   const query = [placeName, locationHint].filter(Boolean).join(" ");
-  const results = await searchTomTom({ query, limit: 1 });
-  const result = results[0] || null;
-  const isMatch = isTomTomResultMatch({ placeName, locationHint, result });
+  const results = await searchTomTom({ query, limit: 3, countryCode });
+  
+  let matchResult = null;
+  for (const res of results) {
+    if (isTomTomResultMatch({ placeName, locationHint, result: res })) {
+      matchResult = res;
+      break;
+    }
+  }
+
+  const isMatch = matchResult !== null;
+  const result = matchResult || (results[0] || null);
 
   if (isDebugEnabled()) {
     console.warn(`[${debugLabel}] search_place-result`, {
       query,
       isMatch,
-      result,
+      matchedResult: matchResult,
+      top3Results: results.map(r => r.name),
+      firstResult: results[0] || null,
     });
   }
 
@@ -247,7 +269,7 @@ export async function executeSearchPlace(
       ok: false,
       query,
       error:
-        "Top search result did not match the requested place closely enough.",
+        "None of the top search results matched the requested place closely enough.",
       result: null,
     };
   }
@@ -264,6 +286,7 @@ export async function searchTomTom({
   limit = 1,
   latitude,
   longitude,
+  countryCode,
 }: TomTomSearchOptions): Promise<TomTomSearchResult[]> {
   const trimmedQuery = query.trim();
   if (!trimmedQuery) {
@@ -281,6 +304,7 @@ export async function searchTomTom({
     if (isDebugEnabled()) {
       console.warn("[tomtomSearch] local-cache-hit", {
         query: trimmedQuery,
+        countryCode,
       });
     }
     // LRU Trick: Delete and immediately re-set to bump it to the end of the Map
@@ -298,6 +322,7 @@ export async function searchTomTom({
       if (isDebugEnabled()) {
         console.warn("[tomtomSearch] global-redis-cache-hit", {
           query: trimmedQuery,
+          countryCode,
         });
       }
       evictLeastRecentlyUsed();
@@ -321,6 +346,10 @@ export async function searchTomTom({
     safeParams.set("lon", String(longitude));
   }
 
+  if (countryCode) {
+    safeParams.set("countrySet", countryCode);
+  }
+
   const encodedQuery = encodeURIComponent(trimmedQuery);
   const safeUrl = `https://api.tomtom.com/search/2/poiSearch/${encodedQuery}.json?${safeParams.toString()}`;
   const fetchUrl = `${safeUrl}&key=${apiKey}`;
@@ -328,6 +357,7 @@ export async function searchTomTom({
   if (isDebugEnabled()) {
     console.warn("[tomtomSearch] request", {
       query: trimmedQuery,
+      countryCode,
       url: safeUrl,
     });
   }

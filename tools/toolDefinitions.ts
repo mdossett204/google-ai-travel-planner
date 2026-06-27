@@ -8,7 +8,11 @@ export const SEARCH_PLACE_PROPERTIES = {
   locationHint: {
     type: "STRING",
     description:
-      "Optional city, region, or destination hint to narrow the search.",
+      "The city and state/region to narrow the search (e.g. 'Osaka' or 'Seattle, WA'). Highly recommended.",
+  },
+  countryCode: {
+    type: "STRING",
+    description: "The 2-letter ISO country code of the location (e.g., 'JP', 'US', 'FR'). Highly recommended to ensure accurate search results.",
   },
 };
 
@@ -34,6 +38,6 @@ export const SEARCH_PLACE_TOOL = {
   parameters: {
     type: "OBJECT",
     properties: SEARCH_PLACE_PROPERTIES,
-    required: ["name"],
+    required: ["name", "locationHint", "countryCode"],
   },
 };
