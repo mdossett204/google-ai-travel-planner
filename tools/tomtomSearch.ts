@@ -157,70 +157,93 @@ function normalizeSearchResult(rawResult: unknown): TomTomSearchResult {
 }
 
 function normalizeForMatch(s: string): string {
-  return normalizeUnicode(s).replace(/[^a-z0-9\s]/g, "");
+  // Replace punctuation with spaces so words don't get merged (e.g. "Lodge-Grand" -> "Lodge Grand")
+  return normalizeUnicode(s).replace(/[^a-z0-9]/g, " ").replace(/\s+/g, " ").trim();
 }
 
-export function isTomTomResultMatch({
+export function scoreTomTomResultMatch({
   placeName,
   locationHint,
   result,
-}: TomTomMatchOptions) {
-  if (!result || !result.name.trim()) {
-    return false;
-  }
+}: TomTomMatchOptions): number {
+  if (!result || !result.name.trim()) return 0;
 
   const normalizedPlace = normalizeForMatch(placeName);
   const normalizedResult = normalizeForMatch(result.name);
+  if (!normalizedPlace) return 0;
 
-  if (!normalizedPlace) return false;
+  const STOP_WORDS = new Set(["the", "a", "an", "of", "at", "in", "on", "and", "to", "for"]);
 
-  const placeTokens = normalizedPlace.split(/\s+/).filter(Boolean);
-  const resultTokens = normalizedResult.split(/\s+/).filter(Boolean);
+  const placeTokens = normalizedPlace.split(/\s+/).filter((t) => t && !STOP_WORDS.has(t));
+  const resultTokens = normalizedResult.split(/\s+/).filter((t) => t && !STOP_WORDS.has(t));
+  if (placeTokens.length === 0 || resultTokens.length === 0) return 0;
 
-  if (placeTokens.length === 0 || resultTokens.length === 0) return false;
-
-  // 1. Name Match
-  const intersection = placeTokens.filter((t) => resultTokens.includes(t));
-  const overlapRatio = intersection.length / placeTokens.length;
-
-  // Overlap must be strictly > 50%, UNLESS the result is exactly 1 word, then 50% is allowed.
-  // This allows "Hakata Station" (2 words) to match "Hakata" (1 word), but prevents 
-  // "Fukuoka Tower" (2 words) from matching "Fukuoka Hospital" (2 words).
-  let isNameMatch =
-    overlapRatio > 0.5 || (overlapRatio === 0.5 && resultTokens.length === 1);
-
-  // Substring fallback for single-word queries matching multi-word results
-  // e.g. "Louvre" matches "The Louvre Museum"
-  if (
-    !isNameMatch &&
-    placeTokens.length === 1 &&
-    normalizedResult.includes(normalizedPlace)
-  ) {
-    isNameMatch = true;
-  }
-
-  if (!isNameMatch) return false;
-
-  // 2. Geographic Match
+  // 1. Geographic Match (Must Pass first)
   if (locationHint) {
     const hintTokens = normalizeForMatch(locationHint)
       .split(/\s+/)
-      .filter((t) => t.length > 1); // Ignore single letters
+      .filter((t) => t.length > 1);
 
     if (hintTokens.length > 0) {
       const geoString = normalizeForMatch(
         [result.city, result.region, result.country, result.address].join(" "),
       );
 
-      // We use some() so that if the LLM provides a neighborhood (e.g. "Pilsen, Chicago"),
-      // it passes as long as "Chicago" is in the official address string. 
-      // Country bounding is already safely handled via the TomTom API countrySet parameter.
+      // We use some() so that neighborhoods pass if the city is present.
       const hasGeoMatch = hintTokens.some((t) => geoString.includes(t));
-      if (!hasGeoMatch) return false;
+      if (!hasGeoMatch) return 0;
     }
   }
 
-  return true;
+  // 2. Name Score Calculation
+  const intersection = placeTokens.filter((t) => resultTokens.includes(t));
+  let overlapRatio = intersection.length / placeTokens.length;
+
+  // Substring fallback for single-word queries
+  if (
+    overlapRatio < 1 &&
+    placeTokens.length === 1 &&
+    normalizedResult.includes(normalizedPlace)
+  ) {
+    overlapRatio = 1;
+  }
+
+  // Figure out the relationship between the query and the result
+  const placeUnique = placeTokens.filter((t) => !resultTokens.includes(t));
+  const resultUnique = resultTokens.filter((t) => !placeTokens.includes(t));
+
+  let score = overlapRatio * 100;
+
+  if (placeUnique.length === 0 && resultUnique.length === 0) {
+    score += 50; // Exact Match
+  } else if (placeUnique.length === 0 && resultUnique.length > 0) {
+    score += 30; // Superset (Result is more specific, e.g. "North Mississippi Ave")
+  } else if (placeUnique.length > 0 && resultUnique.length === 0) {
+    score += 10; // Subset (Result is less specific, e.g. "Grand Canyon National Park")
+  } else {
+    score -= 50; // Substitution (Conflicting unique words, e.g. "Point Imperial" vs "Uncle Jim Point")
+  }
+
+  // Tie-breaker: If results tie on the main name (e.g. all score 0), 
+  // give a tiny bonus for locationHint words that appear in the result's name.
+  let tieBreaker = 0;
+  if (locationHint) {
+    const hintTokens = normalizeForMatch(locationHint)
+      .split(/\s+/)
+      .filter((t) => t.length > 1 && !STOP_WORDS.has(t));
+    const hintOverlap = hintTokens.filter((t) => resultTokens.includes(t));
+    
+    // Penalize the result if it adds extra words (like "North") that weren't in the hint or name
+    const resultHintUnique = resultTokens.filter(
+      (t) => !hintTokens.includes(t) && !placeTokens.includes(t),
+    );
+
+    // +0.1 for overlapping words, -0.2 for conflicting extra words
+    tieBreaker = hintOverlap.length * 0.1 - resultHintUnique.length * 0.2; 
+  }
+
+  score = Math.max(0, score);
+  return score + tieBreaker;
 }
 
 export async function executeSearchPlace(
@@ -244,23 +267,38 @@ export async function executeSearchPlace(
   const results = await searchTomTom({ query, limit: 3, countryCode });
   
   let matchResult = null;
+  let bestPassingScore = -1;
+  const MIN_SCORE = 60;
+
+  let absoluteBestResult = results[0] || null;
+  let absoluteBestScore = -1;
+
   for (const res of results) {
-    if (isTomTomResultMatch({ placeName, locationHint, result: res })) {
+    const score = scoreTomTomResultMatch({ placeName, locationHint, result: res });
+    
+    // Track the absolute best result even if it fails the threshold, to use as a smarter fallback
+    if (score > absoluteBestScore) {
+      absoluteBestScore = score;
+      absoluteBestResult = res;
+    }
+
+    if (score > bestPassingScore && score >= MIN_SCORE) {
+      bestPassingScore = score;
       matchResult = res;
-      break;
     }
   }
 
   const isMatch = matchResult !== null;
-  const result = matchResult || (results[0] || null);
+  // If we found a passing match, use it. Otherwise, fallback to the highest scoring failure.
+  const result = matchResult || absoluteBestResult;
 
   if (isDebugEnabled()) {
     console.warn(`[${debugLabel}] search_place-result`, {
       query,
       isMatch,
       matchedResult: matchResult,
-      top3Results: results.map(r => r.name),
-      firstResult: results[0] || null,
+      top3Results: results.map((r) => r.name),
+      bestResult: result,
     });
   }
 
@@ -271,6 +309,7 @@ export async function executeSearchPlace(
       error:
         "None of the top search results matched the requested place closely enough.",
       result: null,
+      bestFallbackResult: result,
     };
   }
 
