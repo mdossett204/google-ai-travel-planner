@@ -366,7 +366,9 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     - Then verify the strongest likely keepers.
     - Only search for replacements when an important slot still needs a specific verified place.
     - If lunch or dinner was skipped in the draft, attempt one targeted replacement search. If no strong verified match is found, leave the slot out rather than forcing a weak option.
-    - If search_place returns no result for a critical slot, note it as: ⚠️ No verified option found — research locally before booking
+    - If the tool returns ok: true, evaluate the 'matchedResult' to ensure it is actually the intended place and not a similarly named but unrelated business (e.g., check the categories). If it is a false positive, reject it.
+    - If the tool returns ok: false but provides a 'bestFallbackResult', evaluate the fallback result. If you judge that it is the intended place (despite minor name differences) or a perfectly valid alternative, you may use the fallback result and treat it as verified.
+    - If search_place returns no result or an unusable fallback for a critical slot, note it as: ⚠️ No verified option found — research locally before booking
     - Use as few tool calls as needed to produce a strong final itinerary.
     </tool_usage_rules>
 

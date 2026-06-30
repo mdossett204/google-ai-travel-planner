@@ -6,6 +6,7 @@ export interface TomTomSearchOptions {
   limit?: number;
   latitude?: number;
   longitude?: number;
+  countryCode?: string;
 }
 
 export interface TomTomSearchResult {
@@ -94,6 +95,7 @@ function buildCacheKey({
   limit,
   latitude,
   longitude,
+  countryCode,
 }: TomTomSearchOptions) {
   const normalizedQuery = normalizeUnicode(query).replace(/[^a-z0-9]+/g, " ");
 
@@ -102,6 +104,7 @@ function buildCacheKey({
     limit: limit ?? 1,
     lat: typeof latitude === "number" ? Number(latitude.toFixed(2)) : null,
     lon: typeof longitude === "number" ? Number(longitude.toFixed(2)) : null,
+    countryCode: countryCode || null,
   });
 }
 
@@ -153,65 +156,155 @@ function normalizeSearchResult(rawResult: unknown): TomTomSearchResult {
   };
 }
 
-function normalizeForMatch(s: string): string {
-  return normalizeUnicode(s).replace(/[^a-z0-9\s]/g, "");
+function getLevenshteinDistance(a: string, b: string): number {
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  
+  const matrix = Array(b.length + 1).fill(null).map(() => Array(a.length + 1).fill(null));
+
+  for (let i = 0; i <= a.length; i++) {
+    matrix[0][i] = i;
+  }
+  for (let j = 0; j <= b.length; j++) {
+    matrix[j][0] = j;
+  }
+
+  for (let j = 1; j <= b.length; j++) {
+    for (let i = 1; i <= a.length; i++) {
+      const indicator = a[i - 1] === b[j - 1] ? 0 : 1;
+      matrix[j][i] = Math.min(
+        matrix[j][i - 1] + 1, // deletion
+        matrix[j - 1][i] + 1, // insertion
+        matrix[j - 1][i - 1] + indicator // substitution
+      );
+    }
+  }
+  return matrix[b.length][a.length];
 }
 
-export function isTomTomResultMatch({
+function getStringSimilarity(a: string, b: string): number {
+  const distance = getLevenshteinDistance(a, b);
+  const maxLength = Math.max(a.length, b.length);
+  return maxLength === 0 ? 1 : (maxLength - distance) / maxLength;
+}
+
+function normalizeForMatch(s: string): string {
+  const SYNONYMS: Record<string, string> = {
+    mt: "mount",
+    ave: "avenue",
+    rd: "road",
+    blvd: "boulevard",
+    hwy: "highway",
+    pkwy: "parkway",
+    dr: "drive",
+    ln: "lane",
+  };
+
+  const normalized = normalizeUnicode(s)
+    .replace(/'/g, "") // Strip apostrophes first
+    .replace(/[^a-z0-9]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return normalized
+    .split(/\s+/)
+    .map((token) => SYNONYMS[token] || token)
+    .join(" ");
+}
+
+const STOP_WORDS = new Set(["the", "a", "an", "of", "at", "in", "on", "and", "to", "for"]);
+
+export function scoreTomTomResultMatch({
   placeName,
   locationHint,
   result,
-}: TomTomMatchOptions) {
-  if (!result || !result.name.trim()) {
-    return false;
-  }
+}: TomTomMatchOptions): number {
+  if (!result || !result.name.trim()) return 0;
 
   const normalizedPlace = normalizeForMatch(placeName);
   const normalizedResult = normalizeForMatch(result.name);
+  if (!normalizedPlace) return 0;
 
-  if (!normalizedPlace) return false;
+  const placeTokens = Array.from(new Set(normalizedPlace.split(/\s+/).filter((t) => t && !STOP_WORDS.has(t))));
+  const resultTokens = Array.from(new Set(normalizedResult.split(/\s+/).filter((t) => t && !STOP_WORDS.has(t))));
+  if (placeTokens.length === 0 || resultTokens.length === 0) return 0;
 
-  const placeTokens = normalizedPlace.split(/\s+/).filter(Boolean);
-  const resultTokens = normalizedResult.split(/\s+/).filter(Boolean);
+  const hintTokens = locationHint
+    ? normalizeForMatch(locationHint)
+        .split(/\s+/)
+        .filter((t) => t.length > 1 && !STOP_WORDS.has(t))
+    : [];
 
-  if (placeTokens.length === 0 || resultTokens.length === 0) return false;
+  // 1. Geographic Match (Must Pass first)
+  if (hintTokens.length > 0) {
+    const geoTokens = normalizeForMatch(
+      [result.city, result.region, result.country, result.address].join(" "),
+    ).split(/\s+/).filter(Boolean);
 
-  // 1. Strict Name Match: Token overlap must be strictly > 50%
-  const intersection = placeTokens.filter((t) => resultTokens.includes(t));
-  const overlapRatio = intersection.length / placeTokens.length;
-
-  let isNameMatch = overlapRatio > 0.5;
-
-  // Substring fallback for single-word queries matching multi-word results
-  // e.g. "Louvre" matches "The Louvre Museum"
-  if (
-    !isNameMatch &&
-    placeTokens.length === 1 &&
-    normalizedResult.includes(normalizedPlace)
-  ) {
-    isNameMatch = true;
+    // Require at least 60% of hint tokens to be found (via exact match, substring, or high similarity)
+    let geoMatchCount = 0;
+    for (const ht of hintTokens) {
+      if (geoTokens.some((gt) => {
+        const isSubstring = gt.includes(ht) || ht.includes(gt);
+        const validSubstring = isSubstring && Math.min(gt.length, ht.length) >= 2;
+        return getStringSimilarity(ht, gt) >= 0.8 || validSubstring;
+      })) {
+        geoMatchCount++;
+      }
+    }
+    
+    const hasGeoMatch = (geoMatchCount / hintTokens.length) >= 0.6;
+    if (!hasGeoMatch) return 0;
   }
 
-  if (!isNameMatch) return false;
+  // 2. Name Score Calculation (Fuzzy Sørensen–Dice coefficient)
+  let matchScoreSum = 0;
+  for (const pt of placeTokens) {
+    let bestSim = 0;
+    for (const rt of resultTokens) {
+      let sim = getStringSimilarity(pt, rt);
+      // Boost substring matches if the matching portion is long enough
+      if (rt.includes(pt) || pt.includes(rt)) {
+        if (Math.min(pt.length, rt.length) >= 4) {
+          sim = Math.max(sim, 0.9);
+        }
+      }
+      if (sim > bestSim) bestSim = sim;
+    }
+    matchScoreSum += bestSim;
+  }
 
-  // 2. Geographic Match
-  if (locationHint) {
-    const hintTokens = normalizeForMatch(locationHint)
-      .split(/\s+/)
-      .filter((t) => t.length > 1); // Ignore single letters
-
-    if (hintTokens.length > 0) {
-      const geoString = normalizeForMatch(
-        [result.city, result.region, result.country, result.address].join(" "),
-      );
-
-      // The result must contain at least one significant word from the location hint
-      const hasGeoMatch = hintTokens.some((t) => geoString.includes(t));
-      if (!hasGeoMatch) return false;
+  let fuzzyDice = (2 * matchScoreSum) / (placeTokens.length + resultTokens.length);
+  
+  // If user's entire query is found in the result strongly, ensure score passes threshold.
+  // To prevent false positives on short queries (e.g., "Belleville" matching "Garage Mecanique Belleville Paris"),
+  // we only apply this boost if the result doesn't have an excessive number of extra words.
+  if (matchScoreSum / placeTokens.length > 0.8) {
+    const allowedResultTokens = placeTokens.length * 2 + 1;
+    if (resultTokens.length <= allowedResultTokens) {
+      fuzzyDice = Math.max(fuzzyDice, (matchScoreSum / placeTokens.length) * 0.8);
     }
   }
 
-  return true;
+  let score = fuzzyDice * 100;
+
+  // Tie-breaker: If results tie on the main name (e.g. all score 0), 
+  // give a tiny bonus for locationHint words that appear in the result's name.
+  let tieBreaker = 0;
+  if (hintTokens.length > 0) {
+    const hintOverlap = hintTokens.filter((t) => resultTokens.some((rt) => getStringSimilarity(t, rt) >= 0.8));
+    
+    // Penalize the result if it adds extra words (like "North") that weren't in the hint or name
+    const resultHintUnique = resultTokens.filter(
+      (rt) => !hintTokens.some((t) => getStringSimilarity(t, rt) >= 0.8) && !placeTokens.some((pt) => getStringSimilarity(pt, rt) >= 0.8),
+    );
+
+    // +0.1 for overlapping words, -0.2 for conflicting extra words
+    tieBreaker = hintOverlap.length * 0.1 - resultHintUnique.length * 0.2; 
+  }
+
+  score = Math.max(0, score);
+  return score + tieBreaker;
 }
 
 export async function executeSearchPlace(
@@ -221,6 +314,8 @@ export async function executeSearchPlace(
   const placeName = typeof args.name === "string" ? args.name.trim() : "";
   const locationHint =
     typeof args.locationHint === "string" ? args.locationHint.trim() : "";
+  const countryCode =
+    typeof args.countryCode === "string" ? args.countryCode.trim() : undefined;
 
   if (!placeName) {
     return {
@@ -230,15 +325,41 @@ export async function executeSearchPlace(
   }
 
   const query = [placeName, locationHint].filter(Boolean).join(" ");
-  const results = await searchTomTom({ query, limit: 1 });
-  const result = results[0] || null;
-  const isMatch = isTomTomResultMatch({ placeName, locationHint, result });
+  const results = await searchTomTom({ query, limit: 3, countryCode });
+  
+  let matchResult = null;
+  let bestPassingScore = -1;
+  const MIN_SCORE = 60;
+
+  let absoluteBestResult = results[0] || null;
+  let absoluteBestScore = -1;
+
+  for (const res of results) {
+    const score = scoreTomTomResultMatch({ placeName, locationHint, result: res });
+    
+    // Track the absolute best result even if it fails the threshold, to use as a smarter fallback
+    if (score > absoluteBestScore) {
+      absoluteBestScore = score;
+      absoluteBestResult = res;
+    }
+
+    if (score > bestPassingScore && score >= MIN_SCORE) {
+      bestPassingScore = score;
+      matchResult = res;
+    }
+  }
+
+  const isMatch = matchResult !== null;
+  // If we found a passing match, use it. Otherwise, fallback to the highest scoring failure.
+  const result = matchResult || absoluteBestResult;
 
   if (isDebugEnabled()) {
     console.warn(`[${debugLabel}] search_place-result`, {
       query,
       isMatch,
-      result,
+      matchedResult: matchResult,
+      top3Results: results.map((r) => r.name),
+      bestResult: result,
     });
   }
 
@@ -247,8 +368,9 @@ export async function executeSearchPlace(
       ok: false,
       query,
       error:
-        "Top search result did not match the requested place closely enough.",
+        "None of the top search results matched the requested place closely enough.",
       result: null,
+      bestFallbackResult: result,
     };
   }
 
@@ -264,6 +386,7 @@ export async function searchTomTom({
   limit = 1,
   latitude,
   longitude,
+  countryCode,
 }: TomTomSearchOptions): Promise<TomTomSearchResult[]> {
   const trimmedQuery = query.trim();
   if (!trimmedQuery) {
@@ -281,6 +404,7 @@ export async function searchTomTom({
     if (isDebugEnabled()) {
       console.warn("[tomtomSearch] local-cache-hit", {
         query: trimmedQuery,
+        countryCode,
       });
     }
     // LRU Trick: Delete and immediately re-set to bump it to the end of the Map
@@ -298,6 +422,7 @@ export async function searchTomTom({
       if (isDebugEnabled()) {
         console.warn("[tomtomSearch] global-redis-cache-hit", {
           query: trimmedQuery,
+          countryCode,
         });
       }
       evictLeastRecentlyUsed();
@@ -321,6 +446,10 @@ export async function searchTomTom({
     safeParams.set("lon", String(longitude));
   }
 
+  if (countryCode) {
+    safeParams.set("countrySet", countryCode);
+  }
+
   const encodedQuery = encodeURIComponent(trimmedQuery);
   const safeUrl = `https://api.tomtom.com/search/2/poiSearch/${encodedQuery}.json?${safeParams.toString()}`;
   const fetchUrl = `${safeUrl}&key=${apiKey}`;
@@ -328,6 +457,7 @@ export async function searchTomTom({
   if (isDebugEnabled()) {
     console.warn("[tomtomSearch] request", {
       query: trimmedQuery,
+      countryCode,
       url: safeUrl,
     });
   }
