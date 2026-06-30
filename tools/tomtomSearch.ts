@@ -156,10 +156,63 @@ function normalizeSearchResult(rawResult: unknown): TomTomSearchResult {
   };
 }
 
-function normalizeForMatch(s: string): string {
-  // Replace punctuation with spaces so words don't get merged (e.g. "Lodge-Grand" -> "Lodge Grand")
-  return normalizeUnicode(s).replace(/[^a-z0-9]/g, " ").replace(/\s+/g, " ").trim();
+function getLevenshteinDistance(a: string, b: string): number {
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  
+  const matrix = Array(b.length + 1).fill(null).map(() => Array(a.length + 1).fill(null));
+
+  for (let i = 0; i <= a.length; i++) {
+    matrix[0][i] = i;
+  }
+  for (let j = 0; j <= b.length; j++) {
+    matrix[j][0] = j;
+  }
+
+  for (let j = 1; j <= b.length; j++) {
+    for (let i = 1; i <= a.length; i++) {
+      const indicator = a[i - 1] === b[j - 1] ? 0 : 1;
+      matrix[j][i] = Math.min(
+        matrix[j][i - 1] + 1, // deletion
+        matrix[j - 1][i] + 1, // insertion
+        matrix[j - 1][i - 1] + indicator // substitution
+      );
+    }
+  }
+  return matrix[b.length][a.length];
 }
+
+function getStringSimilarity(a: string, b: string): number {
+  const distance = getLevenshteinDistance(a, b);
+  const maxLength = Math.max(a.length, b.length);
+  return maxLength === 0 ? 1 : (maxLength - distance) / maxLength;
+}
+
+function normalizeForMatch(s: string): string {
+  const SYNONYMS: Record<string, string> = {
+    mt: "mount",
+    ave: "avenue",
+    rd: "road",
+    blvd: "boulevard",
+    hwy: "highway",
+    pkwy: "parkway",
+    dr: "drive",
+    ln: "lane",
+  };
+
+  const normalized = normalizeUnicode(s)
+    .replace(/'/g, "") // Strip apostrophes first
+    .replace(/[^a-z0-9]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return normalized
+    .split(/\s+/)
+    .map((token) => SYNONYMS[token] || token)
+    .join(" ");
+}
+
+const STOP_WORDS = new Set(["the", "a", "an", "of", "at", "in", "on", "and", "to", "for"]);
 
 export function scoreTomTomResultMatch({
   placeName,
@@ -172,70 +225,78 @@ export function scoreTomTomResultMatch({
   const normalizedResult = normalizeForMatch(result.name);
   if (!normalizedPlace) return 0;
 
-  const STOP_WORDS = new Set(["the", "a", "an", "of", "at", "in", "on", "and", "to", "for"]);
-
-  const placeTokens = normalizedPlace.split(/\s+/).filter((t) => t && !STOP_WORDS.has(t));
-  const resultTokens = normalizedResult.split(/\s+/).filter((t) => t && !STOP_WORDS.has(t));
+  const placeTokens = Array.from(new Set(normalizedPlace.split(/\s+/).filter((t) => t && !STOP_WORDS.has(t))));
+  const resultTokens = Array.from(new Set(normalizedResult.split(/\s+/).filter((t) => t && !STOP_WORDS.has(t))));
   if (placeTokens.length === 0 || resultTokens.length === 0) return 0;
 
+  const hintTokens = locationHint
+    ? normalizeForMatch(locationHint)
+        .split(/\s+/)
+        .filter((t) => t.length > 1 && !STOP_WORDS.has(t))
+    : [];
+
   // 1. Geographic Match (Must Pass first)
-  if (locationHint) {
-    const hintTokens = normalizeForMatch(locationHint)
-      .split(/\s+/)
-      .filter((t) => t.length > 1);
+  if (hintTokens.length > 0) {
+    const geoTokens = normalizeForMatch(
+      [result.city, result.region, result.country, result.address].join(" "),
+    ).split(/\s+/).filter(Boolean);
 
-    if (hintTokens.length > 0) {
-      const geoString = normalizeForMatch(
-        [result.city, result.region, result.country, result.address].join(" "),
-      );
+    // Require at least 60% of hint tokens to be found (via exact match, substring, or high similarity)
+    let geoMatchCount = 0;
+    for (const ht of hintTokens) {
+      if (geoTokens.some((gt) => {
+        const isSubstring = gt.includes(ht) || ht.includes(gt);
+        const validSubstring = isSubstring && Math.min(gt.length, ht.length) >= 2;
+        return getStringSimilarity(ht, gt) >= 0.8 || validSubstring;
+      })) {
+        geoMatchCount++;
+      }
+    }
+    
+    const hasGeoMatch = (geoMatchCount / hintTokens.length) >= 0.6;
+    if (!hasGeoMatch) return 0;
+  }
 
-      // We use some() so that neighborhoods pass if the city is present.
-      const hasGeoMatch = hintTokens.some((t) => geoString.includes(t));
-      if (!hasGeoMatch) return 0;
+  // 2. Name Score Calculation (Fuzzy Sørensen–Dice coefficient)
+  let matchScoreSum = 0;
+  for (const pt of placeTokens) {
+    let bestSim = 0;
+    for (const rt of resultTokens) {
+      let sim = getStringSimilarity(pt, rt);
+      // Boost substring matches if the matching portion is long enough
+      if (rt.includes(pt) || pt.includes(rt)) {
+        if (Math.min(pt.length, rt.length) >= 4) {
+          sim = Math.max(sim, 0.9);
+        }
+      }
+      if (sim > bestSim) bestSim = sim;
+    }
+    matchScoreSum += bestSim;
+  }
+
+  let fuzzyDice = (2 * matchScoreSum) / (placeTokens.length + resultTokens.length);
+  
+  // If user's entire query is found in the result strongly, ensure score passes threshold.
+  // To prevent false positives on short queries (e.g., "Belleville" matching "Garage Mecanique Belleville Paris"),
+  // we only apply this boost if the result doesn't have an excessive number of extra words.
+  if (matchScoreSum / placeTokens.length > 0.8) {
+    const allowedResultTokens = placeTokens.length * 2 + 1;
+    if (resultTokens.length <= allowedResultTokens) {
+      fuzzyDice = Math.max(fuzzyDice, (matchScoreSum / placeTokens.length) * 0.8);
     }
   }
 
-  // 2. Name Score Calculation
-  const intersection = placeTokens.filter((t) => resultTokens.includes(t));
-  let overlapRatio = intersection.length / placeTokens.length;
-
-  // Substring fallback for single-word queries
-  if (
-    overlapRatio < 1 &&
-    placeTokens.length === 1 &&
-    normalizedResult.includes(normalizedPlace)
-  ) {
-    overlapRatio = 1;
-  }
-
-  // Figure out the relationship between the query and the result
-  const placeUnique = placeTokens.filter((t) => !resultTokens.includes(t));
-  const resultUnique = resultTokens.filter((t) => !placeTokens.includes(t));
-
-  let score = overlapRatio * 100;
-
-  if (placeUnique.length === 0 && resultUnique.length === 0) {
-    score += 50; // Exact Match
-  } else if (placeUnique.length === 0 && resultUnique.length > 0) {
-    score += 30; // Superset (Result is more specific, e.g. "North Mississippi Ave")
-  } else if (placeUnique.length > 0 && resultUnique.length === 0) {
-    score += 10; // Subset (Result is less specific, e.g. "Grand Canyon National Park")
-  } else {
-    score -= 50; // Substitution (Conflicting unique words, e.g. "Point Imperial" vs "Uncle Jim Point")
-  }
+  let score = fuzzyDice * 100;
 
   // Tie-breaker: If results tie on the main name (e.g. all score 0), 
   // give a tiny bonus for locationHint words that appear in the result's name.
   let tieBreaker = 0;
-  if (locationHint) {
-    const hintTokens = normalizeForMatch(locationHint)
-      .split(/\s+/)
-      .filter((t) => t.length > 1 && !STOP_WORDS.has(t));
-    const hintOverlap = hintTokens.filter((t) => resultTokens.includes(t));
+  if (hintTokens.length > 0) {
+    const hintOverlap = hintTokens.filter((t) => resultTokens.some((rt) => getStringSimilarity(t, rt) >= 0.8));
     
     // Penalize the result if it adds extra words (like "North") that weren't in the hint or name
     const resultHintUnique = resultTokens.filter(
-      (t) => !hintTokens.includes(t) && !placeTokens.includes(t),
+      (rt) => !hintTokens.some((t) => getStringSimilarity(t, rt) >= 0.8) && !placeTokens.some((pt) => getStringSimilarity(pt, rt) >= 0.8),
     );
 
     // +0.1 for overlapping words, -0.2 for conflicting extra words
