@@ -253,6 +253,7 @@ export function scoreTomTomResultMatch({
       }
     }
     
+
     const hasGeoMatch = (geoMatchCount / hintTokens.length) >= 0.6;
     if (!hasGeoMatch) return 0;
   }

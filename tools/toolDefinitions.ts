@@ -8,7 +8,7 @@ export const SEARCH_PLACE_PROPERTIES = {
   locationHint: {
     type: "STRING",
     description:
-      "The city and state/region to narrow the search (e.g. 'Osaka' or 'Seattle, WA'). Highly recommended.",
+      "ONLY the broad city and country (e.g. 'Tokyo, Japan' or 'Seattle, WA'). Do NOT include specific neighborhoods, regions, or street names (like 'Ueno' or 'Southern Kyoto'), as it will break the geographic validation.",
   },
   countryCode: {
     type: "STRING",
