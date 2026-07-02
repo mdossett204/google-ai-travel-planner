@@ -69,6 +69,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
     <budget_estimation_rules>
     - Estimate trip cost using the user's inputs as the primary guide.
+    - OMITTED CATEGORIES: If a budget category (such as Lodging or Food) is marked "Not requested" or "omit", assume its cost is $0. Do NOT estimate or hallucinate average costs for omitted categories. The final estimated total must ONLY reflect the costs of the categories the user explicitly kept.
     - Lodging estimate: nightly lodging budget multiplied by the approximate number of nights.
     - Local transportation estimate: use the provided local transportation budget as the default ceiling for in-destination movement only, adjusted only when the destination or local transport preference clearly makes that unrealistic.
     - Food estimate: daily food budget multiplied by the approximate number of trip days.
