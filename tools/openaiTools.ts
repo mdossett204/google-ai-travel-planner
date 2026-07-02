@@ -28,6 +28,10 @@ export function getOpenAIVerificationTools(): OpenAI.Chat.ChatCompletionTool[] {
               type: "string",
               description: SEARCH_PLACE_PROPERTIES.locationHint.description,
             },
+            countryCode: {
+              type: "string",
+              description: SEARCH_PLACE_PROPERTIES.countryCode.description,
+            },
           },
           required: SEARCH_PLACE_TOOL.parameters.required,
         } as Record<string, unknown>,

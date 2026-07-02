@@ -41,21 +41,47 @@ export function getOnLocationDays(durationDays: number): number {
   return Math.max(durationDays - 1, 1);
 }
 
-export function buildLocationRules(preferredLocation: {
-  stateOrProvince?: string;
-  city?: string;
-}): string {
-  return [
+export function buildLocationRules(
+  preferredLocation: {
+    stateOrProvince?: string;
+    city?: string;
+  },
+  attractionInterests?: string,
+  isItineraryDraft: boolean = false
+): string {
+  const hasState = Boolean(preferredLocation.stateOrProvince?.trim());
+  const hasCity = Boolean(preferredLocation.city?.trim());
+  const hasAttractions = Boolean(attractionInterests?.trim());
+
+  const rules = [
     "- You MUST stay strictly inside the requested country.",
-    preferredLocation.stateOrProvince?.trim()
-      ? `- If a state/province is provided, stay strictly inside ${sanitizePromptInput(preferredLocation.stateOrProvince)}.`
-      : null,
-    preferredLocation.city?.trim()
-      ? `- If a city is provided, stay strictly inside ${sanitizePromptInput(preferredLocation.city)}.`
-      : null,
-  ]
-    .filter(Boolean)
-    .join("\n    ");
+  ];
+
+  if (hasState) {
+    rules.push(
+      `- If a state/province is provided, stay strictly inside ${sanitizePromptInput(preferredLocation.stateOrProvince)}.`
+    );
+  }
+
+  if (hasCity) {
+    rules.push(
+      `- If a city is provided, stay strictly inside ${sanitizePromptInput(preferredLocation.city)}.`
+    );
+  }
+
+  if (!hasState && !hasCity && hasAttractions) {
+    if (isItineraryDraft) {
+      rules.push(
+        `- Focus ONLY on the Destination provided above. You may pull from the user's requested attractions, but ONLY if they actually geographically belong in this specific Destination.`
+      );
+    } else {
+      rules.push(
+        `- Since no specific city or state was provided, you MUST keep all 3 recommendations entirely focused on the requested attractions: ${sanitizePromptInput(attractionInterests)}.`
+      );
+    }
+  }
+
+  return rules.join("\n    ");
 }
 
 export function buildUserPreferencesContext(

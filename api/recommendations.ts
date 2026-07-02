@@ -30,7 +30,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     assertRedisConfigured();
 
     const data = validateTravelFormData(await readJsonBody(req));
-    const locationRules = buildLocationRules(data.preferredLocation);
+    const locationRules = buildLocationRules(data.preferredLocation, data.attractionInterests);
 
     const prompt = `
     Based on the travel preferences below, provide exactly 3 travel recommendations.
@@ -46,6 +46,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     - Interpret duration primarily as trip days. Unless the input clearly means something else, assume approximate nights = max(days - 1, 0).
     - If fewer than 3 materially different destinations are possible within the requested location, return 3 variants within that same destination and make the differences explicit.
     - If attraction interests are given, prioritize them only if they genuinely fit the requested destination and trip naturally.
+    - If a list of multiple attractions or cities is given, try to fit as many of them as realistically possible into each travel recommendation based on the trip duration. Only exclude an attraction if it is geographically impossible or wildly unrealistic to fit within the timeframe. Do not unnecessarily split the list of attractions across different recommendations; attempt to combine them into one cohesive trip.
     - Favor realistic, geographically coherent, and seasonally appropriate recommendations.
     - Do not recommend places that are clearly closed, unavailable, or incompatible with the stated budget and travel style.
     - Each recommendation must differ in at least one primary dimension: sub-region or activity emphasis.
@@ -56,7 +57,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     - Local transportation preferences and budget must materially shape the recommendation. Favor compact, locally explorable parts of the requested region and avoid excessive daily transit unless explicitly requested.
     - The local transportation budget applies only after arrival at the destination. Do not use it to reason about flights or long-distance travel to the destination.
     - If the stated local transportation preference is a poor fit for the destination, recommend the most practical local transportation mode for that area while keeping the overall trip aligned with the travel style and budget.
-    - Prefer a geographically compact recommendation where most highlights can be experienced from one base area with limited daily transit.
+    - Prefer a geographically compact recommendation where most highlights can be experienced from one base area, UNLESS the user has explicitly requested multiple distinct cities/attractions. If they did, you MUST build a multi-base or multi-city itinerary that connects them rather than forcing them into a single base.
     </decision_rules>
 
     <conflict_resolution>
@@ -105,7 +106,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     - Confirm the options are meaningfully differentiated, even if they are variants within the same narrow destination.
     - Confirm the cost ranges are realistic and not vague.
     - Confirm the local transportation assumptions are practical for the stated budget and transport preferences.
-    - Confirm the recommendation is geographically compact enough to feel realistic for the trip length.
+    - Confirm the recommendation is geographically realistic for the trip length, accounting for necessary travel time between cities if multiple were requested.
     </final_check>
   `;
 
