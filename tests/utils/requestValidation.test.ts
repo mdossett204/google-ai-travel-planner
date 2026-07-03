@@ -1,0 +1,197 @@
+import { describe, it, expect } from 'vitest';
+import { 
+  validateTomTomPoiSearchRequest,
+  validateTravelFormData,
+  validateRecommendation,
+  validateItineraryRequest,
+  validateRecommendationsResponse,
+  RequestValidationError 
+} from '../../utils/requestValidation.js';
+
+describe('requestValidation', () => {
+  describe('validateTomTomPoiSearchRequest', () => {
+    it('validates a correct request', () => {
+      const result = validateTomTomPoiSearchRequest({
+        query: 'Eiffel Tower',
+        limit: 10,
+        latitude: 48.8584,
+        longitude: 2.2945
+      });
+
+      expect(result).toEqual({
+        query: 'Eiffel Tower',
+        limit: 10,
+        latitude: 48.8584,
+        longitude: 2.2945
+      });
+    });
+
+    it('throws error if query is missing', () => {
+      expect(() => validateTomTomPoiSearchRequest({ limit: 5 }))
+        .toThrow(RequestValidationError);
+    });
+
+    it('throws error if limit is out of bounds', () => {
+      expect(() => validateTomTomPoiSearchRequest({ query: 'Eiffel Tower', limit: 100 }))
+        .toThrow(RequestValidationError);
+    });
+
+    it('provides a default limit if missing', () => {
+      const result = validateTomTomPoiSearchRequest({ query: 'Eiffel Tower' });
+      expect(result.limit).toBe(5);
+    });
+
+    it('throws error if latitude is not a number', () => {
+      expect(() => validateTomTomPoiSearchRequest({ query: 'Eiffel Tower', latitude: '48.8' }))
+        .toThrow('latitude must be a number.');
+    });
+
+    it('throws error if latitude is less than -90', () => {
+      expect(() => validateTomTomPoiSearchRequest({ query: 'Eiffel Tower', latitude: -100 }))
+        .toThrow('latitude cannot be less than -90.');
+    });
+
+    it('throws error if latitude is greater than 90', () => {
+      expect(() => validateTomTomPoiSearchRequest({ query: 'Eiffel Tower', latitude: 100 }))
+        .toThrow('latitude cannot exceed 90.');
+    });
+  });
+
+  describe('validateTravelFormData', () => {
+    const getValidFormData = () => ({
+      timeOfYear: ['Jan'],
+      durationValue: 5,
+      durationUnit: 'days',
+      travelers: 'Solo',
+      preferredLocation: { country: 'Japan', city: 'Tokyo' },
+      budget: { lodging: 100 },
+      includeFood: false,
+      includeLodging: false,
+    });
+    it('validates and parses valid form data', () => {
+      const result = validateTravelFormData({
+        timeOfYear: ['Jan'],
+        durationValue: 5,
+        durationUnit: 'days',
+        travelers: 'Solo',
+        preferredLocation: { country: 'Japan', city: 'Tokyo' },
+        budget: { lodging: 100 },
+        includeFood: false,
+        includeLodging: false,
+      });
+      expect(result.durationValue).toBe(5);
+      expect(result.travelers).toBe('Solo');
+      expect(result.preferredLocation.country).toBe('Japan');
+    });
+
+    it('validates durationValue positive number constraints', () => {
+      const validData = getValidFormData();
+      
+      // Test negative
+      validData.durationValue = -1;
+      expect(() => validateTravelFormData(validData)).toThrow('durationValue must be a positive number');
+      
+      // Test non-finite
+      validData.durationValue = Infinity;
+      expect(() => validateTravelFormData(validData)).toThrow('durationValue must be a positive number');
+      
+      // Test max exceed
+      validData.durationValue = 100;
+      expect(() => validateTravelFormData(validData)).toThrow('durationValue cannot exceed 14');
+      
+      validData.durationValue = 10;
+      
+      // Test duration limit with weeks
+      validData.durationUnit = 'weeks';
+      validData.durationValue = 3;
+      expect(() => validateTravelFormData(validData)).toThrow('Duration cannot exceed 2 weeks.');
+    });
+
+    it('validates durationUnit enum correctly', () => {
+      const validData = getValidFormData();
+      validData.durationUnit = 'months';
+      expect(() => validateTravelFormData(validData)).toThrow('durationUnit must be one of: days, weeks');
+    });
+
+    it('validates optional numbers with min and max', () => {
+      const validData = getValidFormData();
+      validData.budget = { lodging: -100 };
+      expect(() => validateTravelFormData(validData)).toThrow('lodging cannot be less than 0');
+      
+      validData.budget = { lodging: 100000 };
+      expect(() => validateTravelFormData(validData)).toThrow('budget.lodging cannot exceed 20000');
+      
+      validData.budget = { lodging: NaN };
+      expect(() => validateTravelFormData(validData)).toThrow('lodging must be a number');
+    });
+
+    it('throws on invalid duration', () => {
+      expect(() => validateTravelFormData({ durationValue: -1 })).toThrow(RequestValidationError);
+    });
+
+    it('throws if weeks exceed 2', () => {
+      expect(() => validateTravelFormData({
+        durationValue: 3, durationUnit: 'weeks',
+        budget: {}, preferredLocation: { country: 'Japan' }
+      })).toThrow(RequestValidationError);
+    });
+  });
+
+  describe('validateRecommendation', () => {
+    it('validates a correct recommendation', () => {
+      const result = validateRecommendation({
+        id: '1', title: 'Test', description: 'Desc', highlights: ['a', 'b', 'c'], estimatedCost: '$1', bestTimeToGo: 'Now'
+      });
+      expect(result.id).toBe('1');
+    });
+
+    it('throws if required string is missing', () => {
+      expect(() => validateRecommendation({ title: 'Test' })).toThrow(RequestValidationError);
+    });
+  });
+
+  describe('validateItineraryRequest', () => {
+    it('validates full itinerary request', () => {
+      const result = validateItineraryRequest({
+        data: {
+          durationValue: 5, durationUnit: 'days', travelers: 'Solo',
+          budget: {}, preferredLocation: { country: 'Japan' },
+          includeFood: false, includeLodging: false
+        },
+        recommendation: {
+          id: '1', title: 'Test', description: 'Desc', highlights: ['a'], estimatedCost: '$1', bestTimeToGo: 'Now'
+        }
+      });
+      expect(result.data.durationValue).toBe(5);
+      expect(result.recommendation.id).toBe('1');
+    });
+  });
+
+  describe('validateRecommendationsResponse', () => {
+    it('validates exactly 3 recommendations', () => {
+      const rec = { id: '1', title: 'T', description: 'D', highlights: ['a', 'b', 'c'], estimatedCost: '$1', bestTimeToGo: 'Now' };
+      const result = validateRecommendationsResponse([rec, rec, rec]);
+      expect(result.length).toBe(3);
+    });
+
+    it('throws if not an array', () => {
+      expect(() => validateRecommendationsResponse({})).toThrow(RequestValidationError);
+    });
+
+    it('throws if not exactly 3', () => {
+      const rec = { id: '1', title: 'T', description: 'D', highlights: ['a', 'b', 'c'], estimatedCost: '$1', bestTimeToGo: 'Now' };
+      expect(() => validateRecommendationsResponse([rec, rec])).toThrow(RequestValidationError);
+    });
+
+    it('truncates highlights if more than 3', () => {
+      const rec = { id: '1', title: 'T', description: 'D', highlights: ['a', 'b', 'c', 'd'], estimatedCost: '$1', bestTimeToGo: 'Now' };
+      const result = validateRecommendationsResponse([rec, rec, rec]);
+      expect(result[0].highlights.length).toBe(3);
+    });
+    
+    it('throws if highlights less than 3', () => {
+      const rec = { id: '1', title: 'T', description: 'D', highlights: ['a', 'b'], estimatedCost: '$1', bestTimeToGo: 'Now' };
+      expect(() => validateRecommendationsResponse([rec, rec, rec])).toThrow(RequestValidationError);
+    });
+  });
+});
