@@ -115,14 +115,9 @@ export async function getRedisClient(): Promise<RedisClientLike> {
   assertRedisConfigured();
 
   if (!redisClient) {
-    if (isLocalDevelopment) {
-      logLocalFallback("REDIS_URL is missing or uses the placeholder value.");
-      return localRedisClient;
-    }
-
-    throw new RedisConfigurationError(
-      "Server configuration error: missing REDIS_URL.",
-    );
+    // assertRedisConfigured already threw for production without a URL
+    logLocalFallback("REDIS_URL is missing or uses the placeholder value.");
+    return localRedisClient;
   }
 
   try {

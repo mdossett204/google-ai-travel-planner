@@ -39,8 +39,8 @@ describe('apiHelpers', () => {
   });
 
   describe('sanitizePromptInput', () => {
-    it('removes curly braces and brackets', () => {
-      expect(sanitizePromptInput('{hello} [world] | test')).toBe('hello world test');
+    it('preserves curly braces and brackets', () => {
+      expect(sanitizePromptInput('{hello} [world] | test')).toBe('{hello} [world] | test');
     });
 
     it('replaces angle brackets', () => {
@@ -53,6 +53,10 @@ describe('apiHelpers', () => {
 
     it('removes newlines', () => {
       expect(sanitizePromptInput('hello\nworld')).toBe('hello world');
+    });
+
+    it('handles null or undefined input', () => {
+      expect(sanitizePromptInput(null)).toBe('');
     });
   });
 
@@ -128,11 +132,28 @@ describe('apiHelpers', () => {
       );
     });
 
+    it('handles configuration errors', () => {
+      const consoleErrorMock = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const err = new Error('Missing key');
+      err.name = 'LlmConfigurationError';
+      handleApiError(mockRes, err);
+      expect(mockRes.statusCode).toBe(500);
+      expect(mockRes.end).toHaveBeenCalledWith(JSON.stringify({ error: 'Server configuration error. Please try again later.' }));
+      expect(consoleErrorMock).toHaveBeenCalled();
+      consoleErrorMock.mockRestore();
+    });
+
     it('handles unknown errors', () => {
       const err = new Error('Something exploded');
       handleApiError(mockRes, err);
       expect(mockRes.statusCode).toBe(500);
       expect(mockRes.end).toHaveBeenCalledWith(JSON.stringify({ error: 'Server error' }));
+    });
+    it('handles generic object error', () => {
+      const err = { name: 'InvalidJsonBodyError', message: 'Bad JSON', status: 400 };
+      handleApiError(mockRes, err);
+      expect(mockRes.statusCode).toBe(400);
+      expect(mockRes.end).toHaveBeenCalledWith(JSON.stringify({ error: 'Bad JSON' }));
     });
   });
 });

@@ -42,6 +42,22 @@ describe('Recommendations Component', () => {
     expect(screen.getByText('Sushi')).toBeInTheDocument();
   });
 
+  it('handles an empty title gracefully for the SVG placeholder', () => {
+    const emptyTitleRec = {
+      ...mockRecommendations[0],
+      title: '',
+    };
+    render(
+      <Recommendations
+        recommendations={[emptyTitleRec]}
+        onSelect={vi.fn()}
+        onBack={vi.fn()}
+      />
+    );
+    // The placeholder should fall back to "Trip"
+    expect(screen.getByText('View Itinerary')).toBeInTheDocument();
+  });
+
   it('calls onSelect when a recommendation is clicked', () => {
     const onSelectMock = vi.fn();
     render(

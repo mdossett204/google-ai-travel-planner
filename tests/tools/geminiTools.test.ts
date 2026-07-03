@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { getGeminiVerificationTools, executeGeminiTool } from '../../tools/geminiTools.js';
 import * as toolDefinitions from '../../tools/toolDefinitions.js';
+import { assertToolDelegation } from '../helpers.js';
 
 vi.mock('../../tools/toolDefinitions.js', () => ({
   SEARCH_PLACE_TOOL: { name: 'search_place', description: 'mock search place' },
@@ -23,20 +24,11 @@ describe('geminiTools', () => {
 
   describe('executeGeminiTool', () => {
     it('delegates to executeProviderTool with geminiTools label', async () => {
-      const mockResult = { ok: true };
-      vi.mocked(toolDefinitions.executeProviderTool).mockResolvedValueOnce(mockResult);
-
-      const args = { location: 'Tokyo' };
-      const context = { name: 'search_place', args };
-
-      const result = await executeGeminiTool(context);
-
-      expect(toolDefinitions.executeProviderTool).toHaveBeenCalledWith(
-        'search_place',
-        args,
+      await assertToolDelegation(
+        executeGeminiTool,
+        vi.mocked(toolDefinitions.executeProviderTool),
         'geminiTools'
       );
-      expect(result).toBe(mockResult);
     });
   });
 });

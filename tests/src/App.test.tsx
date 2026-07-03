@@ -16,6 +16,13 @@ describe('App Component', () => {
     vi.clearAllMocks();
   });
 
+  const renderAndSubmitApp = () => {
+    const utils = render(<App />);
+    fillTravelForm();
+    submitTravelForm();
+    return utils;
+  };
+
   it('renders ErrorBoundary fallback on unhandled error', () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const ThrowError = () => { throw new Error('Test error'); };
@@ -59,13 +66,7 @@ describe('App Component', () => {
     vi.mocked(geminiService.getRecommendations).mockResolvedValue(mockRecommendations);
     vi.mocked(geminiService.getItinerary).mockResolvedValue(mockItineraryText);
 
-    render(<App />);
-    
-    // Fill required form fields
-    fillTravelForm();
-
-    // Submit form
-    submitTravelForm();
+    renderAndSubmitApp();
 
     // Wait for the recommendations component to appear
     await waitFor(() => {
@@ -102,13 +103,7 @@ describe('App Component', () => {
   it('displays error messages when API fails', async () => {
     vi.mocked(geminiService.getRecommendations).mockRejectedValue(new Error('Network error'));
 
-    render(<App />);
-    
-    // Fill required form fields
-    fillTravelForm();
-
-    // Submit form
-    submitTravelForm();
+    renderAndSubmitApp();
 
     // Wait for error message
     await waitFor(() => {
@@ -120,16 +115,37 @@ describe('App Component', () => {
     expect(screen.queryByText('Network error')).not.toBeInTheDocument();
   });
 
+  it('displays fallback error message when API rejects with a string', async () => {
+    vi.mocked(geminiService.getRecommendations).mockRejectedValue('String error');
+
+    renderAndSubmitApp();
+
+    await waitFor(() => {
+      expect(screen.getByText('An error occurred while fetching recommendations.')).toBeInTheDocument();
+    });
+  });
+
+  it('ignores AbortError gracefully', async () => {
+    const abortError = new Error('AbortError');
+    abortError.name = 'AbortError';
+    vi.mocked(geminiService.getRecommendations).mockRejectedValue(abortError);
+
+    renderAndSubmitApp();
+
+    // Since it returns without setting error, the loading state should eventually clear if we unmounted or changed state,
+    // but in this test it just sits there. We just verify no error message appears.
+    await new Promise(r => setTimeout(r, 100)); // small wait
+    expect(screen.queryByText('An error occurred while fetching recommendations.')).not.toBeInTheDocument();
+  });
+
   it('displays error when getting itinerary fails', async () => {
     const mockRecommendations = [
       { id: 'rec-1', title: 'Kyoto Cultural Trip', description: 'desc', highlights: [], estimatedCost: '$1k', bestTimeToGo: 'Spring' }
     ];
     vi.mocked(geminiService.getRecommendations).mockResolvedValue(mockRecommendations);
-    vi.mocked(geminiService.getItinerary).mockResolvedValue(null);
+    vi.mocked(geminiService.getItinerary).mockRejectedValue(new Error('Network error'));
 
-    render(<App />);
-    fillTravelForm();
-    submitTravelForm();
+    renderAndSubmitApp();
 
     await waitFor(() => {
       expect(screen.getByText('Your Travel Options')).toBeInTheDocument();
@@ -138,8 +154,27 @@ describe('App Component', () => {
     fireEvent.click(screen.getByText('Kyoto Cultural Trip'));
 
     await waitFor(() => {
-      expect(screen.getByText("Couldn't generate the itinerary. Please try again.")).toBeInTheDocument();
+      expect(screen.getByText('Network error')).toBeInTheDocument();
     });
+  });
+
+  it('displays error when getting itinerary returns null', async () => {
+    const mockRecommendations = [
+      { id: 'rec-1', title: 'Kyoto Cultural Trip', description: 'desc', highlights: [], estimatedCost: '$1k', bestTimeToGo: 'Spring' }
+    ];
+    vi.mocked(geminiService.getRecommendations).mockResolvedValue(mockRecommendations);
+    vi.mocked(geminiService.getItinerary).mockResolvedValueOnce(null as any);
+
+    renderAndSubmitApp();
+
+    await waitFor(() => {
+      expect(screen.getByText('Your Travel Options')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('Kyoto Cultural Trip'));
+    
+    // Check for error
+    expect(await screen.findByText("Couldn't generate the itinerary. Please try again.")).toBeInTheDocument();
   });
 
   it('can restart from the itinerary view', async () => {
@@ -178,9 +213,7 @@ describe('App Component', () => {
     vi.mocked(geminiService.getRecommendations).mockResolvedValue(mockRecommendations);
     vi.mocked(geminiService.getItinerary).mockResolvedValue('Itinerary Data');
 
-    render(<App />);
-    fillTravelForm();
-    submitTravelForm();
+    renderAndSubmitApp();
 
     await waitFor(() => {
       expect(screen.getByText('Your Travel Options')).toBeInTheDocument();

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { getOpenAIVerificationTools, executeOpenAITool } from '../../tools/openaiTools.js';
 import * as toolDefinitions from '../../tools/toolDefinitions.js';
+import { assertToolDelegation } from '../helpers.js';
 
 vi.mock('../../tools/toolDefinitions.js', () => ({
   SEARCH_PLACE_TOOL: { name: 'search_place', description: 'mock search place', parameters: { required: ['name'] } },
@@ -24,20 +25,11 @@ describe('openaiTools', () => {
 
   describe('executeOpenAITool', () => {
     it('delegates to executeProviderTool with openaiTools label', async () => {
-      const mockResult = { ok: true };
-      vi.mocked(toolDefinitions.executeProviderTool).mockResolvedValueOnce(mockResult);
-
-      const args = { location: 'Berlin' };
-      const context = { name: 'search_place', args };
-
-      const result = await executeOpenAITool(context);
-
-      expect(toolDefinitions.executeProviderTool).toHaveBeenCalledWith(
-        'search_place',
-        args,
+      await assertToolDelegation(
+        executeOpenAITool,
+        vi.mocked(toolDefinitions.executeProviderTool),
         'openaiTools'
       );
-      expect(result).toBe(mockResult);
     });
   });
 });

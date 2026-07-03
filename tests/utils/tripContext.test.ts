@@ -127,5 +127,28 @@ describe('tripContext', () => {
       expect(context).toContain('FOOD: Not requested');
       expect(context).toContain('LODGING: Not requested');
     });
+    it('handles missing budget values when included', () => {
+      const context = buildUserPreferencesContext({
+        timeOfYear: [],
+        durationValue: 5,
+        durationUnit: 'days',
+        travelers: 'Solo',
+        activityLevel: '',
+        primaryGoal: [],
+        attractionInterests: '',
+        preferredLocation: { country: 'France', stateOrProvince: '', city: 'Paris' },
+        localTransportation: [],
+        budget: {}, // Empty budget, so it should fallback to "Any"
+        includeLodging: true,
+        includeFood: true,
+        foodPreferences: { dietaryRestrictions: [], cuisineInterests: [], diningStyle: [], foodPlaceTypes: [], foodPriority: '' },
+        lodgingPreferences: { lodgingTypes: [] },
+      });
+
+      expect(context).toContain('- Lodging: $Any per night');
+      expect(context).toContain('- Food: $Any per day');
+      expect(context).toContain('- Local Transportation: $Any total');
+      expect(context).toContain('- Miscellaneous/Activities: $Any total');
+    });
   });
 });

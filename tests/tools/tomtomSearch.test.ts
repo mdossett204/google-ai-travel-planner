@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { scoreTomTomResultMatch, executeSearchPlace, searchTomTom } from '../../tools/tomtomSearch.js';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
+import { scoreTomTomResultMatch, executeSearchPlace, searchTomTom, assertTomTomApiKeyConfigured, TomTomConfigurationError } from '../../tools/tomtomSearch.js';
 import * as redisUtils from '../../utils/redis.js';
 import * as apiHelpers from '../../utils/apiHelpers.js';
 
@@ -23,6 +23,29 @@ describe('tomtomSearch', () => {
 
   afterEach(() => {
     process.env = originalEnv;
+  });
+
+  describe('assertTomTomApiKeyConfigured', () => {
+    const originalEnv = process.env;
+
+    beforeEach(() => {
+      vi.resetModules();
+      process.env = { ...originalEnv };
+    });
+
+    afterAll(() => {
+      process.env = originalEnv;
+    });
+
+    it('throws TomTomConfigurationError if API key is missing', () => {
+      delete process.env.TOMTOM_SEARCH_API_KEY;
+      expect(() => assertTomTomApiKeyConfigured()).toThrow(TomTomConfigurationError);
+    });
+
+    it('throws TomTomConfigurationError if API key is blank', () => {
+      process.env.TOMTOM_SEARCH_API_KEY = '   ';
+      expect(() => assertTomTomApiKeyConfigured()).toThrow(TomTomConfigurationError);
+    });
   });
 
   describe('scoreTomTomResultMatch', () => {
@@ -101,6 +124,33 @@ describe('tomtomSearch', () => {
       expect(result.result).toBeDefined();
       expect((result.result as any).name).toBe('Central Park');
     });
+
+    it('returns best fallback result if no match is found', async () => {
+      vi.mocked(redisUtils.runFixedWindowRateLimit).mockResolvedValue(true);
+      const mockRedisClient = { get: vi.fn().mockResolvedValue(null), set: vi.fn().mockResolvedValue('OK') };
+      vi.mocked(redisUtils.getRedisClient).mockResolvedValue(mockRedisClient as any);
+
+      const mockResponse = {
+        results: [
+          {
+            id: '1',
+            poi: { name: 'Completely Different Name' },
+            address: { municipality: 'Los Angeles', countrySubdivisionName: 'CA', country: 'USA' },
+          }
+        ]
+      };
+
+      (global.fetch as any).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve(mockResponse)
+      });
+
+      const result = await executeSearchPlace({ name: 'Different Park', locationHint: 'New York' }, 'test');
+      
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('None of the top search results matched');
+      expect((result as any).bestFallbackResult).toBeDefined();
+    });
   });
 
   describe('searchTomTom', () => {
@@ -137,7 +187,90 @@ describe('tomtomSearch', () => {
       // Second call should hit local cache
       const cachedResults = await searchTomTom({ query: 'Louvre', limit: 1 });
       expect(cachedResults).toHaveLength(1);
-      expect(global.fetch).toHaveBeenCalledTimes(1); // Fetch not called again
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('logs debug info on local cache hit', async () => {
+      vi.mocked(redisUtils.runFixedWindowRateLimit).mockResolvedValue(true);
+      const mockRedisClient = { get: vi.fn().mockResolvedValue(null), set: vi.fn().mockResolvedValue('OK') };
+      vi.mocked(redisUtils.getRedisClient).mockResolvedValue(mockRedisClient as any);
+      
+      process.env.DEBUG_LLM_ROUTER = 'true';
+      const consoleWarnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      (global.fetch as any).mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ results: [{ poi: { name: 'Cache Me' } }] })
+      });
+      await searchTomTom({ query: 'DebugLocalCache' }); // First call to cache it
+
+      const cachedResults = await searchTomTom({ query: 'DebugLocalCache' }); // Second call hits local cache
+      expect(cachedResults).toHaveLength(1);
+      
+      expect(consoleWarnMock).toHaveBeenCalledWith(
+        '[tomtomSearch] local-cache-hit',
+        expect.any(Object)
+      );
+
+      consoleWarnMock.mockRestore();
+      delete process.env.DEBUG_LLM_ROUTER;
+    });
+
+    it('hits global redis cache if local cache misses', async () => {
+      vi.mocked(redisUtils.runFixedWindowRateLimit).mockResolvedValue(true);
+      const cachedData = JSON.stringify([{ id: '1', name: 'Redis Hit' }]);
+      const mockRedisClient = { get: vi.fn().mockResolvedValue(cachedData), set: vi.fn().mockResolvedValue('OK') };
+      vi.mocked(redisUtils.getRedisClient).mockResolvedValue(mockRedisClient as any);
+      
+      process.env.DEBUG_LLM_ROUTER = 'true';
+      const consoleWarnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const results = await searchTomTom({ query: 'RedisCacheTest' });
+      expect(results).toHaveLength(1);
+      expect(results[0].name).toBe('Redis Hit');
+      
+      expect(consoleWarnMock).toHaveBeenCalledWith(
+        '[tomtomSearch] global-redis-cache-hit',
+        expect.any(Object)
+      );
+
+      consoleWarnMock.mockRestore();
+      delete process.env.DEBUG_LLM_ROUTER;
+    });
+
+    it('handles redis read error safely', async () => {
+      vi.mocked(redisUtils.runFixedWindowRateLimit).mockResolvedValue(true);
+      const mockRedisClient = { get: vi.fn().mockRejectedValue(new Error('Redis is down')), set: vi.fn().mockResolvedValue('OK') };
+      vi.mocked(redisUtils.getRedisClient).mockResolvedValue(mockRedisClient as any);
+      const consoleWarnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      (global.fetch as any).mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ results: [{ poi: { name: 'Fallback API Hit' } }] })
+      });
+
+      const results = await searchTomTom({ query: 'RedisErrorTest' });
+      expect(results[0].name).toBe('Fallback API Hit');
+      expect(consoleWarnMock).toHaveBeenCalledWith('[tomtomSearch] redis-cache-read-error', expect.any(Error));
+      consoleWarnMock.mockRestore();
+    });
+
+
+    it('hits local cache without debug logging if debug is disabled', async () => {
+      vi.mocked(redisUtils.runFixedWindowRateLimit).mockResolvedValue(true);
+      const mockRedisClient = { get: vi.fn().mockResolvedValue(null), set: vi.fn().mockResolvedValue('OK') };
+      vi.mocked(redisUtils.getRedisClient).mockResolvedValue(mockRedisClient as any);
+      const consoleWarnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      (global.fetch as any).mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ results: [{ poi: { name: 'Nodebug Cache' } }] })
+      });
+      await searchTomTom({ query: 'Nodebug', limit: 1 });
+      const cachedResults = await searchTomTom({ query: 'Nodebug', limit: 1 });
+      expect(cachedResults[0].name).toBe('Nodebug Cache');
+      expect(consoleWarnMock).not.toHaveBeenCalledWith('[tomtomSearch] local-cache-hit', expect.any(Object));
+      consoleWarnMock.mockRestore();
     });
 
     it('retries on 429 rate limit and logs debug if enabled', async () => {
@@ -148,6 +281,7 @@ describe('tomtomSearch', () => {
 
       (global.fetch as any)
         .mockResolvedValueOnce({ status: 429, ok: false, text: () => Promise.resolve('Rate limit') })
+        .mockResolvedValueOnce({ status: 503, ok: false, text: () => Promise.resolve('Service Unavailable') })
         .mockResolvedValueOnce({
           ok: true,
           status: 200,
@@ -155,11 +289,30 @@ describe('tomtomSearch', () => {
         });
 
       const results = await searchTomTom({ query: 'Eiffel Tower' });
-      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(global.fetch).toHaveBeenCalledTimes(3);
       expect(apiHelpers.sleep).toHaveBeenCalled();
       expect(results).toEqual([]);
       
       delete process.env.DEBUG_LLM;
+    });
+
+    it('handles network string errors safely', async () => {
+      vi.mocked(redisUtils.runFixedWindowRateLimit).mockResolvedValue(true);
+      const mockRedisClient = { get: vi.fn().mockResolvedValue(null), set: vi.fn().mockResolvedValue('OK') };
+      vi.mocked(redisUtils.getRedisClient).mockResolvedValue(mockRedisClient as any);
+      
+      const consoleErrorMock = vi.spyOn(console, 'error').mockImplementation(() => {});
+      (global.fetch as any).mockRejectedValueOnce('Network string error crash');
+
+      await expect(searchTomTom({ query: 'Test' })).rejects.toThrow('A network error occurred while connecting to the TomTom API.');
+      expect(consoleErrorMock).toHaveBeenCalledWith(
+        '[tomtomSearch] network error:',
+        'Network string error crash',
+        'for URL:',
+        expect.any(String)
+      );
+      
+      consoleErrorMock.mockRestore();
     });
 
     it('throws immediately on non-retryable errors like 403', async () => {

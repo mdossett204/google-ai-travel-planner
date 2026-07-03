@@ -94,6 +94,46 @@ describe('redis', () => {
       expect(await client.get('foo')).toBe('bar'); // Should not overwrite
     });
 
+    it('handles expiration correctly in local fallback', async () => {
+      process.env.NODE_ENV = 'development';
+      delete process.env.REDIS_URL;
+      const { getRedisClient } = await import('../../utils/redis.js');
+      const client = await getRedisClient();
+      
+      // Set with EX=-1 to expire immediately
+      await client.set('expiring_key', 'value', { EX: -1 });
+      expect(await client.get('expiring_key')).toBe(null);
+
+      await client.set('expiring_key2', 'value', { EX: -1 });
+      const incrResult = await client.incr('expiring_key2');
+      expect(incrResult).toBe(1); // Increment treats null as 0
+      
+      // We can also test NX with an expired key (NX should succeed if the key expired)
+      await client.set('expiring_key3', 'value', { EX: -1 });
+      await client.set('expiring_key3', 'new_value', { NX: true });
+      expect(await client.get('expiring_key3')).toBe('new_value');
+    });
+
+    it('returns redisClient directly if it is already open', async () => {
+      process.env.NODE_ENV = 'production';
+      process.env.REDIS_URL = 'redis://localhost:6379';
+      const { createClient } = await import('redis');
+      const mockConnect = vi.fn();
+      vi.mocked(createClient).mockReturnValueOnce({
+        on: vi.fn(),
+        connect: mockConnect,
+        isOpen: true,
+        get: vi.fn(),
+        set: vi.fn(),
+        incr: vi.fn(),
+      } as any);
+
+      const { getRedisClient } = await import('../../utils/redis.js');
+      const client = await getRedisClient();
+      expect(mockConnect).not.toHaveBeenCalled();
+      expect(client.isOpen).toBe(true);
+    });
+
     it('throws RedisConnectionError if connection fails in production', async () => {
       process.env.NODE_ENV = 'production';
       process.env.REDIS_URL = 'redis://localhost:6379';
@@ -155,6 +195,29 @@ describe('redis', () => {
       errorHandler(new Error('Test error'));
       expect(consoleErrorMock).toHaveBeenCalled();
       consoleErrorMock.mockRestore();
+    });
+
+    it('logs warning on redis error event in development', async () => {
+      process.env.NODE_ENV = 'development';
+      process.env.REDIS_URL = 'redis://localhost:6379';
+      const { createClient } = await import('redis');
+      
+      let errorHandler: any;
+      vi.mocked(createClient).mockReturnValueOnce({
+        on: vi.fn().mockImplementation((event, handler) => {
+          if (event === 'error') errorHandler = handler;
+        }),
+        connect: vi.fn(),
+        isOpen: true,
+      } as any);
+
+      await import('../../utils/redis.js');
+      expect(errorHandler).toBeDefined();
+      
+      const consoleWarnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      errorHandler(new Error('Test dev error'));
+      expect(consoleWarnMock).toHaveBeenCalledWith('Redis error:', expect.any(Error));
+      consoleWarnMock.mockRestore();
     });
   });
 

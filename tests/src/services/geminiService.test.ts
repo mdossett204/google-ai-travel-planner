@@ -61,6 +61,29 @@ describe('geminiService', () => {
       await expect(getRecommendations(mockTravelData)).rejects.toThrow(/endpoint not found|API route not found/i);
     });
 
+    it('throws generic fallback error when not a 404 and no JSON error is returned', async () => {
+      (global.fetch as any).mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: () => Promise.reject(new Error('no json'))
+      });
+
+      await expect(getRecommendations(mockTravelData)).rejects.toThrow('Failed to fetch from /api/recommendations.');
+    });
+
+    it('throws specific 404 error when not in dev mode', async () => {
+      vi.stubEnv('DEV', ''); // Clear DEV mode
+      
+      (global.fetch as any).mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        json: () => Promise.reject(new Error('no json'))
+      });
+
+      await expect(getRecommendations(mockTravelData)).rejects.toThrow('Service endpoint not found. Please try again later.');
+      vi.unstubAllEnvs();
+    });
+
     it('throws error if a recommendation is missing required fields', async () => {
       const mockRecs = [
         { id: '1', /* missing title */ description: 'B', highlights: ['C'], estimatedCost: '$100', bestTimeToGo: 'Now' }

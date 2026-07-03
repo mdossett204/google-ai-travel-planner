@@ -107,4 +107,45 @@ describe('Itinerary Component', () => {
     URL.revokeObjectURL = originalRevokeObjectURL;
     vi.restoreAllMocks();
   });
+
+  it('uses default name Travel if title is empty or special chars', () => {
+    const originalCreateObjectURL = URL.createObjectURL;
+    const originalRevokeObjectURL = URL.revokeObjectURL;
+    
+    URL.createObjectURL = vi.fn(() => 'blob:mock-url');
+    URL.revokeObjectURL = vi.fn();
+
+    const mockAnchor = {
+      href: '',
+      download: '',
+      click: vi.fn(),
+    };
+    
+    render(
+      <Itinerary
+        recommendation={{ ...mockRecommendation, title: '___ ' }}
+        itinerary={mockItineraryMarkdown}
+        onBack={vi.fn()}
+        onRestart={vi.fn()}
+      />
+    );
+
+    const originalCreateElement = document.createElement.bind(document);
+    vi.spyOn(document, 'createElement').mockImplementation((tagName) => {
+      if (tagName === 'a') return mockAnchor as any;
+      return originalCreateElement(tagName);
+    });
+    
+    vi.spyOn(document.body, 'appendChild').mockImplementation(() => null as any);
+    vi.spyOn(document.body, 'removeChild').mockImplementation(() => null as any);
+
+    fireEvent.click(screen.getByText('Save Plan'));
+
+    expect(mockAnchor.download).toBe('Travel_Itinerary.md');
+
+    // Restore globals
+    URL.createObjectURL = originalCreateObjectURL;
+    URL.revokeObjectURL = originalRevokeObjectURL;
+    vi.restoreAllMocks();
+  });
 });

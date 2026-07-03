@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { 
   validateTomTomPoiSearchRequest,
   validateTravelFormData,
@@ -135,6 +135,60 @@ describe('requestValidation', () => {
         budget: {}, preferredLocation: { country: 'Japan' }
       })).toThrow(RequestValidationError);
     });
+
+    it('truncates strings if they exceed max length', () => {
+      const validData = getValidFormData();
+      validData.attractionInterests = 'a'.repeat(200);
+      const consoleWarnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const result = validateTravelFormData(validData);
+      expect(result.attractionInterests).toHaveLength(100);
+      expect(consoleWarnMock).toHaveBeenCalledWith(expect.stringContaining('exceeds maximum length'));
+      consoleWarnMock.mockRestore();
+    });
+
+    it('throws if a string array field is not an array', () => {
+      const validData = getValidFormData();
+      (validData as any).timeOfYear = "Jan";
+      expect(() => validateTravelFormData(validData)).toThrow('timeOfYear must be an array');
+    });
+
+    it('throws if a string array field exceeds max items', () => {
+      const validData = getValidFormData();
+      (validData as any).primaryGoal = Array(51).fill('Relaxation');
+      expect(() => validateTravelFormData(validData)).toThrow('primaryGoal cannot exceed 50 items');
+    });
+
+    it('throws if a string array contains non-strings', () => {
+      const validData = getValidFormData();
+      (validData as any).primaryGoal = ['Relaxation', 123];
+      expect(() => validateTravelFormData(validData)).toThrow('primaryGoal must be an array of strings');
+    });
+
+    it('throws if an enum array contains invalid enum values', () => {
+      const validData = getValidFormData();
+      (validData as any).primaryGoal = ['Relaxation', 'InvalidGoal'];
+      expect(() => validateTravelFormData(validData)).toThrow('must contain only');
+    });
+
+    it('truncates strings inside an array if they exceed max length', () => {
+      // test validateRecommendation with a super long highlight
+      const rec = {
+        id: 'test', title: 'Test', description: 'test',
+        highlights: ['a'.repeat(200), 'b', 'c'],
+        estimatedCost: '$100', bestTimeToGo: 'now'
+      };
+      const consoleWarnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const result = validateRecommendation(rec);
+      expect(result.highlights[0]).toHaveLength(100);
+      expect(consoleWarnMock).toHaveBeenCalledWith(expect.stringContaining('exceeded maximum length'));
+      consoleWarnMock.mockRestore();
+    });
+
+    it('throws if boolean field receives a non-boolean', () => {
+      const validData = getValidFormData();
+      (validData as any).includeFood = "yes";
+      expect(() => validateTravelFormData(validData)).toThrow('includeFood must be a boolean');
+    });
   });
 
   describe('validateRecommendation', () => {
@@ -192,6 +246,15 @@ describe('requestValidation', () => {
     it('throws if highlights less than 3', () => {
       const rec = { id: '1', title: 'T', description: 'D', highlights: ['a', 'b'], estimatedCost: '$1', bestTimeToGo: 'Now' };
       expect(() => validateRecommendationsResponse([rec, rec, rec])).toThrow(RequestValidationError);
+    });
+
+    it('throws if required fields are missing', () => {
+      const validRec = { id: '1', title: 'T', description: 'D', highlights: ['a', 'b', 'c'], estimatedCost: '$1', bestTimeToGo: 'Now' };
+      expect(() => validateRecommendationsResponse([{ ...validRec, title: undefined } as any, validRec, validRec])).toThrow(RequestValidationError);
+      expect(() => validateRecommendationsResponse([{ ...validRec, description: undefined } as any, validRec, validRec])).toThrow(RequestValidationError);
+      expect(() => validateRecommendationsResponse([{ ...validRec, estimatedCost: undefined } as any, validRec, validRec])).toThrow(RequestValidationError);
+      expect(() => validateRecommendationsResponse([{ ...validRec, bestTimeToGo: undefined } as any, validRec, validRec])).toThrow(RequestValidationError);
+      expect(() => validateRecommendationsResponse([{ ...validRec, id: undefined } as any, validRec, validRec])).toThrow(RequestValidationError);
     });
   });
 });

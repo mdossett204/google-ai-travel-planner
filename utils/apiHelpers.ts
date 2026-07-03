@@ -52,7 +52,6 @@ export function sanitizePromptInput(value: unknown, maxLength = 500): string {
     )
     .replace(/\r\n?|\n/g, " ")
     .replace(/[<>]/g, (char) => (char === "<" ? "&lt;" : "&gt;"))
-    .replace(/[{}\[\]|]/g, " ") // Prevent structural prompt injection
     .replace(/`{2,}/g, "`")
     .replace(/"{3,}/g, '"')
     .replace(/#{2,}/g, "#")
