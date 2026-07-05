@@ -107,11 +107,15 @@ function getItineraryVerificationConfig(): {
     };
   }
 
-  return {
-    provider: "openai",
-    model,
-    openaiTools: getOpenAIVerificationTools(),
-  };
+  if (rawProvider === "openai") {
+    return {
+      provider: "openai",
+      model,
+      openaiTools: getOpenAIVerificationTools(),
+    };
+  }
+
+  throw new Error(`Invalid ITINERARY_VERIFICATION_PROVIDER: ${rawProvider}. Provider not found.`);
 }
 
 export default async function handler(req: ApiRequest, res: ApiResponse) {
