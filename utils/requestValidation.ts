@@ -53,12 +53,6 @@ export interface ValidatedItineraryRequest {
   recommendation: ValidatedRecommendation;
 }
 
-export interface ValidatedTomTomPoiSearchRequest {
-  query: string;
-  limit: number;
-  latitude?: number;
-  longitude?: number;
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -549,28 +543,3 @@ export function validateRecommendationsResponse(raw: unknown) {
   });
 }
 
-export function validateTomTomPoiSearchRequest(
-  raw: unknown,
-): ValidatedTomTomPoiSearchRequest {
-  const input = requireRecord(raw, "Request body");
-  const query = parseString(input.query, "query", { allowEmpty: false }).trim();
-  const limitRaw = parseOptionalNumber(input.limit, "limit", {
-    min: 1,
-    max: MAX_TOMTOM_LIMIT,
-  });
-
-  const limit: number = limitRaw ?? 5;
-
-  return {
-    query,
-    limit,
-    latitude: parseOptionalNumber(input.latitude, "latitude", {
-      min: -90,
-      max: 90,
-    }),
-    longitude: parseOptionalNumber(input.longitude, "longitude", {
-      min: -180,
-      max: 180,
-    }),
-  };
-}

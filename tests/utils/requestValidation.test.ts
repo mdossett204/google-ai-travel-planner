@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
 import { 
-  validateTomTomPoiSearchRequest,
   validateTravelFormData,
   validateRecommendation,
   validateItineraryRequest,
@@ -9,53 +8,7 @@ import {
 } from '../../utils/requestValidation.js';
 
 describe('requestValidation', () => {
-  describe('validateTomTomPoiSearchRequest', () => {
-    it('validates a correct request', () => {
-      const result = validateTomTomPoiSearchRequest({
-        query: 'Eiffel Tower',
-        limit: 10,
-        latitude: 48.8584,
-        longitude: 2.2945
-      });
 
-      expect(result).toEqual({
-        query: 'Eiffel Tower',
-        limit: 10,
-        latitude: 48.8584,
-        longitude: 2.2945
-      });
-    });
-
-    it('throws error if query is missing', () => {
-      expect(() => validateTomTomPoiSearchRequest({ limit: 5 }))
-        .toThrow(RequestValidationError);
-    });
-
-    it('throws error if limit is out of bounds', () => {
-      expect(() => validateTomTomPoiSearchRequest({ query: 'Eiffel Tower', limit: 100 }))
-        .toThrow(RequestValidationError);
-    });
-
-    it('provides a default limit if missing', () => {
-      const result = validateTomTomPoiSearchRequest({ query: 'Eiffel Tower' });
-      expect(result.limit).toBe(5);
-    });
-
-    it('throws error if latitude is not a number', () => {
-      expect(() => validateTomTomPoiSearchRequest({ query: 'Eiffel Tower', latitude: '48.8' }))
-        .toThrow('latitude must be a number.');
-    });
-
-    it('throws error if latitude is less than -90', () => {
-      expect(() => validateTomTomPoiSearchRequest({ query: 'Eiffel Tower', latitude: -100 }))
-        .toThrow('latitude cannot be less than -90.');
-    });
-
-    it('throws error if latitude is greater than 90', () => {
-      expect(() => validateTomTomPoiSearchRequest({ query: 'Eiffel Tower', latitude: 100 }))
-        .toThrow('latitude cannot exceed 90.');
-    });
-  });
 
   describe('validateTravelFormData', () => {
     const getValidFormData = () => ({
