@@ -340,7 +340,9 @@ export async function generateTextWithMeta(
           return openai.chat.completions.create({
             model: resolvedModel,
             messages,
-            ...(openAiResponseFormat ? { response_format: openAiResponseFormat } : {}),
+            ...(openAiResponseFormat
+              ? { response_format: openAiResponseFormat }
+              : {}),
           });
         },
       });
@@ -359,7 +361,9 @@ export async function generateTextWithMeta(
               model: resolvedModel,
               tools: openaiTools,
               messages,
-              ...(openAiResponseFormat ? { response_format: openAiResponseFormat } : {}),
+              ...(openAiResponseFormat
+                ? { response_format: openAiResponseFormat }
+                : {}),
             });
           },
         });
@@ -412,7 +416,9 @@ export async function generateTextWithMeta(
               openai.chat.completions.create({
                 model: resolvedModel,
                 messages: finalMessages,
-                ...(openAiResponseFormat ? { response_format: openAiResponseFormat } : {}),
+                ...(openAiResponseFormat
+                  ? { response_format: openAiResponseFormat }
+                  : {}),
               }),
             (res) => res.choices[0]?.message?.content || "",
           );
@@ -480,7 +486,9 @@ export async function generateTextWithMeta(
             openai.chat.completions.create({
               model: resolvedModel,
               messages: finalMessages,
-              ...(openAiResponseFormat ? { response_format: openAiResponseFormat } : {}),
+              ...(openAiResponseFormat
+                ? { response_format: openAiResponseFormat }
+                : {}),
             }),
           (res) => res.choices[0]?.message?.content || "",
         );
@@ -494,17 +502,20 @@ export async function generateTextWithMeta(
     const hasAnthropicTools = (opts.anthropicTools?.length || 0) > 0;
     const anthropicTools = opts.anthropicTools ?? [];
 
-    const anthropicOutputConfig = opts.responseSchema ? {
-      format: {
-        type: "json_schema" as const,
-        schema: {
-          type: "object",
-          properties: opts.responseSchema.properties,
-          required: opts.responseSchema.required,
-          additionalProperties: opts.responseSchema.additionalProperties ?? false,
+    const anthropicOutputConfig = opts.responseSchema
+      ? {
+          format: {
+            type: "json_schema" as const,
+            schema: {
+              type: "object",
+              properties: opts.responseSchema.properties,
+              required: opts.responseSchema.required,
+              additionalProperties:
+                opts.responseSchema.additionalProperties ?? false,
+            },
+          },
         }
-      }
-    } : undefined;
+      : undefined;
 
     if (!hasAnthropicTools) {
       const msg = await withLlmRetry({
@@ -518,11 +529,13 @@ export async function generateTextWithMeta(
             max_tokens: ANTHROPIC_MAX_TOKENS,
             system: opts.systemInstruction,
             messages: [{ role: "user", content: opts.prompt }],
-            ...(anthropicOutputConfig ? { output_config: anthropicOutputConfig as any } : {})
+            ...(anthropicOutputConfig
+              ? { output_config: anthropicOutputConfig as any }
+              : {}),
           });
         },
       });
-      
+
       text = normalizeText(msg);
     } else {
       let messages: Anthropic.MessageParam[] = [
@@ -543,7 +556,9 @@ export async function generateTextWithMeta(
               system: opts.systemInstruction,
               tools: anthropicTools,
               messages,
-              ...(anthropicOutputConfig ? { output_config: anthropicOutputConfig as any } : {})
+              ...(anthropicOutputConfig
+                ? { output_config: anthropicOutputConfig as any }
+                : {}),
             });
           },
         });
@@ -589,7 +604,9 @@ export async function generateTextWithMeta(
                 max_tokens: ANTHROPIC_MAX_TOKENS,
                 system: opts.systemInstruction,
                 messages: finalMessages,
-                ...(anthropicOutputConfig ? { output_config: anthropicOutputConfig as any } : {})
+                ...(anthropicOutputConfig
+                  ? { output_config: anthropicOutputConfig as any }
+                  : {}),
               }),
             (res) => res,
           );
@@ -675,7 +692,9 @@ export async function generateTextWithMeta(
               max_tokens: ANTHROPIC_MAX_TOKENS,
               system: opts.systemInstruction,
               messages: finalMessages,
-              ...(anthropicOutputConfig ? { output_config: anthropicOutputConfig as any } : {})
+              ...(anthropicOutputConfig
+                ? { output_config: anthropicOutputConfig as any }
+                : {}),
             }),
           (res) => res,
         );
@@ -685,7 +704,7 @@ export async function generateTextWithMeta(
     const gemini = (clients.gemini ??= new GoogleGenAI({
       apiKey: process.env.GEMINI_API_KEY,
     }));
-    resolvedModel = model || "gemini-2.5-flash";
+    resolvedModel = model || "gemini-3.1-flash-lite";
     const hasGeminiFunctionTools = (opts.geminiTools?.length || 0) > 0;
     const tools = hasGeminiFunctionTools
       ? [...(opts.geminiTools || [])]
